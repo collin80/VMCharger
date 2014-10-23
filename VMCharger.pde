@@ -1,48 +1,44 @@
 /*
-EMotorWerks SmartCharger-12000 - a 12kW+ charging system
-
-DIY charger inspired by the work of SimonRafferty & jackbauer on DIYelectriccar.com:
-http://www.diyelectriccar.com/forums/showthread.php/200-build-your-own-intelligent-charger-36627.html. 
-
-DETAILED FORUM DISCUSSION OF THIS DESIGN IS AT 
-http://www.diyelectriccar.com/forums/showthread.php/10kw-60a-diy-charger-open-source-59210p39.html
+This is the firmware for EMotorWerks Intelligent DC Charging Systems - covering the following products:
+* SmartCharge-12000 - a 12kW+ charging system
+* QuickCharge-25000 - a 25kW+ charging system
+* ISOCharge-20000 - a 20kW+ isolated charging system
+* any DC-DC uses of the above
 
 Controller: Arduino Pro Mini 5V (based on a ATmega328P microcontroller)
 
+============================== main operation blocks
 ------ Startup: 
-* check for LCD presence. if none (programming button in the programming state), launch in the serial-controlled mode 
+* check for LCD presence. if none (or the programming button in the programming state), 
+  launch in the serial-controlled mode 
 * 2 timeouts - one 5 sec for config, one 10 sec for power setting. can be interrupled by any button
-* check mains voltage. If 110, limit power to ~1.5kW
+* check mains voltage. If 120, limit power to ~1.5kW
 ------ Charging (CV or CC):
 * modulate duty cycle per PID loop calculations running at 250Hz (double the line frequency)
 * break when exit condition satisfied or stop / pause commands received
 
-============================== SERIAL COMMAND SYNTAX ===============================
+============================== SERIAL COMMAND SYNTAX =================
 M,ccc,vvv,sss,E - start charger from 'READY' state with ccc CC point and vvv CV point
                   charger will echo settings. make sure they are what you sent,
                   sss is a checksum = (ccc + vvv) % 1000 
 M,001,000,001,E - stop charge
-=================== END SERIAL COMMAND SYNTAX ======================================
-============================== SERIAL STATUS REPORTING =============================
+============================== SERIAL STATUS REPORTING ===============
 every 100ms or so, the charger will report its status. 
 Generally a dump of the critical charging parameters in the following format:
 'M,D0,C965,V334,T-68,O1,R0,E' - [D]uty 0%, output [C]urrent 96.5A, output 
 [V]oltage 334V, heatsink [T]emp -68C, [O]utput charge 0.1AH, [R]untime 0 minutes
-=================== END SERIAL STATUS REPORTING FORMAT =============================
 
-************************ HARDWARE MODS REQUIRED *********************************
-********************** TO RUN V14+ ON EMOTORWERKS *******************************
-****************************** CHARGERS! ****************************************
+********** HARDWARE MODS REQUIRED to run this firmware on pre-V14 hardware!!! ************
 * change RC filter on maxC line (pin 10 Arduino) - ensure C is no more than 1uF
-* ensure C<=0.1uF on all current and voltage readings
+* ensure filter capacitance is less or equal to 0.1uF on all current and voltage senging
 *********************************************************************************
-
-Original version created Jan 2011 by Valery Miftakhov, Electric Motor Werks, LLC & Inc. 
-All rights reserved. Copyright 2014
 
 This software is released as open source and is free for any personal use.
 Commercial use prohibited without written approval from the Author and / or Emotorwerks
 Absolutely no warranty is provided and no guarantee for fit for a specific purpose
+
+Original version created Jan 2011 by Valery Miftakhov, Electric Motor Werks, LLC & Inc. 
+All rights reserved. Copyright 2014
 */
 
 #include <avr/interrupt.h> 
@@ -53,24 +49,32 @@ Absolutely no warranty is provided and no guarantee for fit for a specific purpo
 #include "EEPROM_VMcharger.h"
 #include <TimerOne.h>
 
-//----------- DEBUG switch - careful, this disables many safety features...---------------
+//----------- DEBUG switch - careful, this disables many safety features...-----------------------
 // #define DEBUG0 // ad-hoc stuff - targetC at the moment
 // #define DEBUG1 // additional printouts / delays / etc.
 // #define DEBUG2 // even more printouts etc
-//----------------------------------------------------------------------------------------
+//------------------------------------------------------------------------------------------------
 
-//============================== MAIN SWITCHES FOR EMotorWerks chargers =================
-#define VerStr "V14.4"
-//#define SmartCharge // 12kW chargers
-//#define PFC // is this a PFC unit? no need to have this when QuickCharge is selected
+//============================== MAIN SWITCHES FOR EMotorWerks chargers =========================
+#define VerStr "V14.7"
+ #define SmartCharge // 12kW chargers
+ #define PFC // is this a PFC unit? no need to have this when QuickCharge is selected
 
-// #define QuickCharge // 25kW chargers - ONLY FOR AC
+// #define QuickCharge // 25kW chargers - ONLY FOR AC PFC unit
 
- #define DCDC // module is used in DC-DC mode (buck or boost)
- #define DCDC_BUCK // the voltage readings are swapped
+// #define DCDC // module is used in DC-DC mode (buck or boost)
+// #define DCDC_BUCK // the voltage readings are swapped
 
-// #define SLOWPID // for universal voltage non-CHAdeMO units, slow down PID; may also be needed for any PFCDirect units due to time constant of the PFC circuit
-// ===================================================================================================
+//------- resistor values for the voltage sensing dividers -------------------------------
+//------- moved them to here as they are changed very often depending on what unit we have
+// 1M in low-voltage units (up to 150V)
+// 2M in SmartCharge-12000 standard units
+// 2.4M in older PFCdirect units
+// 3M in newer PFCdirect units
+// 5-6M in high voltage units (only on high-side)
+const float upperR0_mV=2000.; 
+const float upperR0_bV=2000.; 
+// ===============================================================================================
 
 
 // ================= SUB-SWITCHES DEFAULT VALUES FOR EMotorWerks chargers ========================
@@ -100,29 +104,18 @@ Absolutely no warranty is provided and no guarantee for fit for a specific purpo
   // in all DCDC units, current runs in opposite direction (for BUCK units, this means that we run the output
   // wire through the same sensor as normally used on the high side)
   #define NEG_CSENSE 
-  
-  // #define INC_ASOUT // in early DCDC_BUCK units, input sensor is used as output sensor; also, need to spec positive current direction in this case
 #endif
 
 // universal defines
-#define LCD_SPE // are we using the SPE version of the LCD (shipped after October 2013)
+ #define LCD_SPE // are we using the SPE version of the LCD (shipped after October 2013)
 #ifndef DCDC
-  // #define drop110power // reduce power to ~1.5kW when connected to 110VAC?
+  #define drop110power // reduce power to ~1.5kW when connected to 110VAC?
   // #define CHECKMAINS
 #endif
 // Zero motorcycles special - run charger for DeltaQ signal - this assumes D6 is pulled up by 5k to 3.3v and is 
 // connected to Zero's deltaQ line on a battery or bike. Test by pulling D6 to ground with 2.2k resistor
 // #define DELTAQ  
 // ===================================================================================================
-
-// sensor constants - moved them to here as they are changed very often depending on what unit we have
-// 1M in low-voltage units (up to 150V)
-// 2M in SmartCharge-12000 standard units
-// 2.4M in most PFCdirect units
-// 3M in newer PFCdirect units
-// 5-6M in high voltage units (but usually only on high-side)
-const float upperR0_mV=3000.; 
-const float upperR0_bV=3000.; 
 
 
 //------------------------------ MAIN SWITCHES STORAGE AREA - OVERRIDES ONLY! --------------------
@@ -134,7 +127,7 @@ const float upperR0_bV=3000.;
 // #define PFCdirect // is this a PFCDirect 25kW unit?
 // #define UVLO // enable gate supply undervoltage protection?
 // #define IND_Temp // do we have a second temp probe on the inductor?
- #define debugpower // doubles the power limits - careful - it may blow up your charger
+// #define debugpower // doubles the power limits - careful - it may blow up your charger
 //------------------------------- END MAIN SWITCHES STORAGE AREA ------------------------------------
 
 
@@ -147,10 +140,10 @@ const unsigned long MAXDMILLIDUTY=9700000; // to run precise PID loop
 #ifdef LOWVOLTAGE
   const int period=130; // 8khz for low-voltage, high-current applications; 60hz line freq
 #else 
-//   const int period=52; // 52us (~20khz) for normal-voltage applications; 60hz line freq
-//  const int period=65; // 65us (~16khz) for high-voltage applications; 60hz line freq
-//  const int period=86; // 86us (~12kHz) for high-voltage applications with high inductance or low inductor voltage 
-  const int period=130; // 130us (~8kHz) for medium-voltage applications with high inductance or low inductor voltage 
+   const int period=52; // 52us (~20khz) for 240VAC SC-12K applications; 60hz line freq
+//  const int period=65; // 65us (~16khz) for 240-400VAC QC-25K applications; 60hz line freq
+//  const int period=86; // 86us (~12kHz) for 240-600VAC QC-25K applications with 400uH or <200V inductor voltage 
+//  const int period=130; // 130us (~8kHz) for 240-400VAC QC-25K applications with 400uH or <200V inductor voltage 
 #endif
 
 const unsigned int linefreq=60; // 60Hz in the US - for best performance, set this to your country's line frequency!
@@ -359,7 +352,7 @@ const byte pin_mV=5;
 const byte pin_pwrCtrlButton=2; // this is wired to the button (used for menu step)
 const byte pin_pwrCtrl2Button=3; // this is wired to the button2 (used for menu select)
 const byte pin_inrelay=4; // precharges input caps - normally pin 4, in some units pin 6 running fan relay
-const byte pin_TEST=5; 
+const byte pin_outrelay=5; // output relay - this is needed for CHAdeMO
 const byte pin_DELTAQ=6; // deltaQ pin
 const byte pin_J1772=7; // J1772 pilot input. 1k is hardwired on V14+ pcbs so J1772 will power on on connect
 const byte pin_fan=8; // fan control - this is pin4 in all kits shipped before Mar '12
@@ -396,6 +389,7 @@ struct config_t {
 // absolute maximum average output current (used in CV mode) - leave at 0 here - will be set via power menu
 const float min_CV_Crating=0.05; // wait until the current goes to XC (use values from your battery's datasheet)
 const float Cstep=0.5; // how quickly the current tapers off in CV step - A / second. cannot be too high to prevent false stops
+byte CVreached=0;
 float maxOutC=0., maxOutC1=0;
 int n=0;
 const float peakMaxC=1.8; // ratio between the average and max current in the inductor before overcurrent kicks in
@@ -709,13 +703,6 @@ void sampleInterrupt() {
           pids_err *= -1; // the current signal (and hence the error sign) runs in a different direction
   #endif        
           
-          // if the current is non-zero already, slow down 
-          // allow deviation of 5% of full range of Tamura sensor (which at 1.5V deviation produces ADC output of 300 units)
-//          if(abs(outC_ADC-outC_ADC_0)>15) {
-//            pids_Kp=pids_Kp_SLOW;
-//            digitalWrite(pin_TEST, HIGH);
-//          }
-          
           deltaDuty = pids_Kp * pids_err;
       
           pids_i += pids_err;
@@ -746,6 +733,8 @@ void sampleInterrupt() {
           if( (PWM_enable_ == 0) || (outV > 1.05*maxOutV) ) {
             milliduty=0;
             pids_i=0; // need to stop accumulation, as well
+            // this is an emergency so stop all PWM
+            PWM_enable_=0;
           }
           
           Timer1.setPwmDuty(pin_PWM, milliduty/10000); 
@@ -772,7 +761,7 @@ void setup() {
   pinMode(pin_DELTAQ, INPUT);
 
   // set output digital pins
-  pinMode(pin_TEST, OUTPUT);
+  pinMode(pin_outrelay, OUTPUT);
   pinMode(pin_PWM, OUTPUT);
   pinMode(pin_maxC, OUTPUT);
   pinMode(pin_EOC, OUTPUT);
@@ -909,11 +898,11 @@ void setup() {
        outV=readV(); // get the readings with zero-point already calibrated
        if(fabs(outV)<3) { // should be pretty tight after zero calibration
          // this is a good time to also do mains calibration - assuming that on the very first power-up and forced config in general
-         // we have zero input
+         // we have zero input AC voltage
          if(forceConfig==1) {
            mainsV=read_mV();
            // only recal if not too far from truth
-           if(mainsV<50) {
+           if(mainsV<30) {
              configuration.mVcal=mainsV/divider_k_mV;
            } else {
              configuration.mVcal=0;
@@ -925,9 +914,15 @@ void setup() {
          while(1) {
            outV=readV();
            if(digitalRead(pin_pwrCtrlButton) || digitalRead(pin_pwrCtrl2Button))  break;
-           if(outV>10) { // loop until battery not connected
-             delay(5000); // let settle
+           if(outV>20) { // loop until battery not connected
+             // battery has been connected, now need to wait until voltage stabilizes
+             // in units with 390R precharge, time constant is up to 4 seconds
+             // we need to wait for 4 constants (15 seconds), then close relay, measure, and open relay again
+             delay(15000); // let settle
+             digitalWrite(pin_outrelay, HIGH);
+             delay(500);
              outV=readV(); // read settled voltage
+             digitalWrite(pin_outrelay, LOW);
              // calibrate
              printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_CAL2);
              // calibration routine here - if actual voltage > shown, REDUCE the constant
@@ -1126,6 +1121,7 @@ void loop() {
             //          series with the outrelay resistor - anode to battery - to avoid precharge on
             //          reverse polarity connection)     
             digitalWrite(pin_inrelay, HIGH);
+            digitalWrite(pin_outrelay, HIGH);
             
             // check for invalid sensor configs
             // most dangerous is disconnection of the current sensor
@@ -1142,6 +1138,7 @@ void loop() {
   
             // make sure everything is off
             digitalWrite(pin_inrelay, LOW);
+            digitalWrite(pin_outrelay, LOW);
             digitalWrite(pin_fan, LOW);    
             digitalWrite(pin_EOC, LOW); // active low
             //==================== charger routine exited ===============================
@@ -1171,9 +1168,10 @@ void loop() {
 //-------------------------------- main charger routine ------------------------------------------------
 int runChargeStep() {
   pids_Kp=pids_Kp_FAST; // start with fast PID - will be changed to slow when we see some current
-  digitalWrite(pin_TEST, LOW); // just to detect the transition between FAST AND SLOW pid constant
   
   maxOutC1=maxOutC;
+  
+  CVreached=0; // status of CV state
   
   // reset V,C readings - otherwise averaging gets screwed up really badly
   outC=0; 
@@ -1210,9 +1208,6 @@ int runChargeStep() {
     targetC_ADC=1024*(k_V_C*maxOutC1
 #ifdef NEG_CSENSE
           *-1
-#endif
-#ifdef INC_ASOUT
-          *outV/mainsV
 #endif
           +V_o_C)/Aref;
 
@@ -1288,6 +1283,14 @@ int runChargeStep() {
         // send status now - this is ~45 symbols. At 19200 bps, this is  ~30ms
         printParams(outV, outC, normT, AH_charger, maxOutC1, maxOutV);
       } else {        
+        // slow voltage control cycle here. AT Cstep=0.5A default, we are ramping down at ~5A/second
+        // this may not be enough to avoid a bit of overvoltage beyond CV
+        // need to do it ONLY for non-serial control as in serial control the charger is a slave
+        if(outV > maxOutV) {
+          CVreached=1;
+          maxOutC-=Cstep;
+          if(maxOutC<0) maxOutC=0;
+        }    
         // recalc maxOutC1 - this will account for temp derating
         maxOutC1=getAllowedC(maxOutC);
         delay(30); // a delay equivalent to non-LCD execution time
@@ -1304,7 +1307,7 @@ int runChargeStep() {
 
       // check for break conditions 
       // mask the first few seconds
-      if(sec_up>CV_timeout && outV > maxOutV && maxOutC1 < configuration.AH*min_CV_Crating) {
+      if(sec_up>CV_timeout && CVreached && maxOutC1 < configuration.AH*min_CV_Crating) {
         breakCycle=1;
       } else {
         breakCycle=0; // reset 
@@ -1318,13 +1321,6 @@ int runChargeStep() {
         }
       } else {
         breakCnt=0;
-      }
-    
-      // slow voltage control cycle here. AT Cstep=0.5A default, we are ramping down at ~0.5A/second
-      // this may not be enough to avoid a bit of overvoltage beyond CV
-      if(outV > maxOutV) {
-        maxOutC-=Cstep;
-        if(maxOutC<0) maxOutC=0;
       }    
       
       // AH meter
@@ -1373,11 +1369,9 @@ int runChargeStep() {
       // check if need to stop - RED button pressed? - both in LCD and non-LCD modes
       if(digitalRead(pin_pwrCtrlButton)==HIGH) return 0; 
       
-      mainsV=read_mV(); // read input voltage only infrequentry
-
 #ifdef CHECKMAINS         
       // check mains
-      if(mainsV<minMains) {
+      if(read_mV()<minMains) {
         delay(2000);
         printClrMsg(MSG_LOSTIN, 5000, 0x1f, 0x3f, 0);
         return 1; // error
@@ -1492,9 +1486,6 @@ float readC() {
   return (Aref/1024.*outC_ADC-V_o_C)/k_V_C
 #ifdef NEG_CSENSE
           *-1
-#endif
-#ifdef INC_ASOUT
-          *mainsV/outV
 #endif
           ;
 }
