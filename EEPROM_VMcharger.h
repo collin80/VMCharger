@@ -1,5 +1,5 @@
 #include <EEPROM.h>
-#include <WProgram.h>  // for type definitions
+#include <Arduino.h>  // for type definitions
 
 template <class T> int EEPROM_writeAnything(int ee, const T& value)
 {

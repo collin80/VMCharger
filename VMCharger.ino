@@ -43,485 +43,67 @@ All rights reserved. Copyright 2014
 
 #include <avr/interrupt.h> 
 #include <avr/pgmspace.h>
-#include <MemoryFree.h>
-// need this to remap PWM frequency
 #include <EEPROM.h>
+#include "MemoryFree.h"
+#include "config.h"
+#include "constants.h"
+#include "globals.h"
+#include "ConfigStruct.h"
 #include "EEPROM_VMcharger.h"
-#include <TimerOne.h>
+#include "TimerOne.h"
+#include "Menu.h"
 
-//----------- DEBUG switch - careful, this disables many safety features...-----------------------
-// #define DEBUG0 // ad-hoc stuff - targetC at the moment
-// #define DEBUG1 // additional printouts / delays / etc.
-// #define DEBUG2 // even more printouts etc
-//------------------------------------------------------------------------------------------------
+//some of these lines are still left here because I don't yet know or haven't decided what to do with them. FIX IT.
+ 
+uint8_t PWM_enable_ = 0; //by default disable PWM output until we are really ready for it
 
-//============================== MAIN SWITCHES FOR EMotorWerks chargers =========================
-#define VerStr "V14.7"
- #define SmartCharge // 12kW chargers
- #define PFC // is this a PFC unit? no need to have this when QuickCharge is selected
-
-// #define QuickCharge // 25kW chargers - ONLY FOR AC PFC unit
-
-// #define DCDC // module is used in DC-DC mode (buck or boost)
-// #define DCDC_BUCK // the voltage readings are swapped
-
-//------- resistor values for the voltage sensing dividers -------------------------------
-//------- moved them to here as they are changed very often depending on what unit we have
-// 1M in low-voltage units (up to 150V)
-// 2M in SmartCharge-12000 standard units
-// 2.4M in older PFCdirect units
-// 3M in newer PFCdirect units
-// 5-6M in high voltage units (only on high-side)
-const float upperR0_mV=2000.; 
-const float upperR0_bV=2000.; 
-// ===============================================================================================
-
-
-// ================= SUB-SWITCHES DEFAULT VALUES FOR EMotorWerks chargers ========================
-// by-version defaults
-#ifdef SmartCharge // the latest version of the PFC version of SmartCharge-12000 12kW chargers
-  #define OUTC_SENSOR_Allegro_100U // default is Allegro_100U
-  #define A7520_V // using A7520 optoisolation for outV sensing? (as opposed to ISO124)
-  #define PC817 // mains voltage sensing based on a crude regular opto (V13 boards)
-#endif
-#ifdef QuickCharge // the latest version of the AC-FED PFCDirect or QuickCharge-25000 25kW chargers
-  #define OUTC_SENSOR_Tamura_150B // Tamura_150B is default for PFCdirect 25kW units only V3 (after Dec 2 2013), Tamura_50B for high-voltage units (800V)
-  #define A7520_V // using A7520 optoisolation for outV sensing? (as opposed to ISO124)
-  #define A7520_mV // using A7520 optoisolation for mV sensing? (as opposed to ISO124)
-  #define PFC // all QuickCharge units are PFC
-  #define PFCdirect // is this a PFCDirect 25kW unit?
-  #define NEG_CSENSE // in post-Oct'13 PFCdirect units, current runs in opposite direction to make 3.3V logic compatible
-#endif
-#ifdef DCDC
-//  #define OUTC_SENSOR_Tamura_600B // Tamura_600B - this is for low-voltage DC-DC only
-  #define OUTC_SENSOR_Tamura_150B // Tamura_150B is default for high-voltage DC-DC
-  #define A7520_V // using A7520 optoisolation for outV sensing? (as opposed to ISO124)
-  #define A7520_mV // using A7520 optoisolation for mV sensing? (as opposed to ISO124)
-  #define DCinput // is this being connected to the DC input or AC? matters for input voltage sense 
-  #define PFCdirect
-  // #define LOWVOLTAGE // low voltage = lower PWM freq
-  
-  // in all DCDC units, current runs in opposite direction (for BUCK units, this means that we run the output
-  // wire through the same sensor as normally used on the high side)
-  #define NEG_CSENSE 
-#endif
-
-// universal defines
- #define LCD_SPE // are we using the SPE version of the LCD (shipped after October 2013)
-#ifndef DCDC
-  #define drop110power // reduce power to ~1.5kW when connected to 110VAC?
-  // #define CHECKMAINS
-#endif
-// Zero motorcycles special - run charger for DeltaQ signal - this assumes D6 is pulled up by 5k to 3.3v and is 
-// connected to Zero's deltaQ line on a battery or bike. Test by pulling D6 to ground with 2.2k resistor
-// #define DELTAQ  
-// ===================================================================================================
-
-
-//------------------------------ MAIN SWITCHES STORAGE AREA - OVERRIDES ONLY! --------------------
-// #define MCC100A // 100A output rating - use ONLY with a custom-wound inductor
-// #define A7520_V // using A7520 optoisolation for outV sensing? (as opposed to ISO124 chip used in earlier versions)
-// #define A7520_mV // using A7520 optoisolation for mV sensing? (as opposed to ISO124 chip used in earlier versions)
-// #define PC817 // mains voltage sensing based on a crude regular opto (V13 boards)
-// #define PFC // is this a PFC unit?
-// #define PFCdirect // is this a PFCDirect 25kW unit?
-// #define UVLO // enable gate supply undervoltage protection?
-// #define IND_Temp // do we have a second temp probe on the inductor?
-// #define debugpower // doubles the power limits - careful - it may blow up your charger
-//------------------------------- END MAIN SWITCHES STORAGE AREA ------------------------------------
-
-
-//----------------------------------- some hardcoded constants - DO NOT CHANGE
-const unsigned long MAXDMILLIDUTY=9700000; // to run precise PID loop   
-
-// from Oct 10 2013, this defaults to 20kHz due to use of faster IGBTs. For kits with older IGBTs, use 60-70
-// for 60hz line frequency, period has to ideally be 260 / N, where N is an integer
-// for 50hz line frequency, 312 / N
-#ifdef LOWVOLTAGE
-  const int period=130; // 8khz for low-voltage, high-current applications; 60hz line freq
-#else 
-   const int period=52; // 52us (~20khz) for 240VAC SC-12K applications; 60hz line freq
-//  const int period=65; // 65us (~16khz) for 240-400VAC QC-25K applications; 60hz line freq
-//  const int period=86; // 86us (~12kHz) for 240-600VAC QC-25K applications with 400uH or <200V inductor voltage 
-//  const int period=130; // 130us (~8kHz) for 240-400VAC QC-25K applications with 400uH or <200V inductor voltage 
-#endif
-
-const unsigned int linefreq=60; // 60Hz in the US - for best performance, set this to your country's line frequency!
-// scaler from PWM frequency. There is a method to the madness here - basically we want to be sampling things at 4x the line
-// frequency and then use two adjacent readings to produce an average. This cancels out most of the 120Hz ripple from the readings
-// in the sampling interrupt, every variable is sampled only every 1/16th period, hence the 16 divider below
-// with 50uS period, 60Hz, this will produce 10.4 which will be rounded to 10, producing 4% phase error which is fine
-const int MEASFREQPWMPRESCALE=(1000/period)*1000/(linefreq*4)/16; 
-
-byte PWM_enable_=0;
-const unsigned int serialspeed=19200; // 115 is unstable, 38.4 is a bit unstable...
-
-#define SerialStrSize 15 // M,ccc,vvv,sss,E
 char SerialStr[SerialStrSize+2]; // buffer for the serial command
 char SerialCommand[SerialStrSize+2]; // this is where the command will actually be stored
+extern char str[64]; //temporary storage buffer
+float maxOutC = 0., maxOutC1 = 0;
+float V_o_mV = V_o_mV0; // need to reassign to non-const as it will be adjusted below
+float divider_k_bV = -1.;
+float V_o_bV = V_o_bV0; // need to reassign to non-const as it will be adjusted below
+float divider_k_mV = -1.;
+byte CVreached=0;
 
-// LCD includes - have to be here in the code as they depend on some switches above
+// V/A constant for the charger output current sensor 
+float V_o_C =
+#ifdef OUTC_SENSOR_Allegro_100U
+0.6; // allegros are 0.6
+#else
+2.5; // tamuras are 2.5
+#endif
+
+// LCD includes - have to be here in the code as they depend on some switches configured by config.h above
 // LCD library for 4D systems display (http://www.4dsystems.com.au/prod.php?id=121)
 #ifdef LCD_SPE
-  #include <uLCD_144_SPE.h>
+  #include "uLCD_144_SPE.h"
   uLCD_144_SPE *myLCD;
 #else
-  #include <uLCD_144.h>
+#include "uLCD_144.h"
   uLCD_144 *myLCD;
 #endif
-byte LCD_on=0; // this defines manual vs serial-controlled operation
+uint8_t LCD_on=0; // this defines manual vs serial-controlled operation
 int cmd[2]={0, 0}; // command variables, used in serial comms
 
-//============================================== define messages ==================
-// using program memory as we are now running out of SRAM...
-// see http://arduino.cc/en/Reference/PROGMEM for reference
-// some additional good memory tips at http://liudr.wordpress.com/2011/02/04/how-to-optimize-your-arduino-memory-usage/
-//-----------------------Navigate Menus--------------------
-const char * configMenu[] = { "Run ", "Pwr ", "Time"  };
-const byte configMenuLen = 3;
-
-const byte MSG_THX = 0x00;
-const byte MSG_NOBATT	= 0x01;
-const byte MSG_WRONGPROF = 0x02;
-const byte MSG_BMSSTOP = 0x03;
-const byte MSG_TIMEOUT = 0x04;
-const byte MSG_USRPAUSE = 0x05;
-const byte MSG_LOSTIN	= 0x06;
-const byte MSG_SENSEERROR = 0x07;
-const byte MSG_NORMEXIT = 0x08;
-const byte MSG_DONE = 0x09;
-
-#ifndef LCD_SPE
-  prog_char msg_long_0[] PROGMEM = "Thank you for choosing EMotorWerks! BTN to CFG";
-  prog_char msg_short_0[] PROGMEM = "INIT";
-  prog_char msg_long_1[] PROGMEM = "No batt or reverse! ANY BTN to ignore";
-  prog_char msg_short_1[] PROGMEM = "NOBATT";
-  prog_char msg_long_2[] PROGMEM = "Wrong profile!";
-  prog_char msg_short_2[] PROGMEM = "WRONGPROF";
-  prog_char msg_long_3[] PROGMEM = "BMS Stop";
-  prog_char msg_short_3[] PROGMEM = "BMSSTOP";
-  prog_char msg_long_4[] PROGMEM = "Timeout";
-  prog_char msg_short_4[] PROGMEM = "TIMEOUT";
-  prog_char msg_long_5[] PROGMEM = "Paused. RED BTN to exit, GRN to resume";
-  prog_char msg_short_5[] PROGMEM = "USRPAUSE";
-  prog_char msg_long_6[] PROGMEM = "Lost AC";
-  prog_char msg_short_6[] PROGMEM = "LOSTIN";
-  prog_char msg_long_7[] PROGMEM = "Sensor/cal error. Recal/chk wiring";
-  prog_char msg_short_7[] PROGMEM = "SENSEERROR";
-  prog_char msg_long_8[] PROGMEM = "Step complete";
-  prog_char msg_short_8[] PROGMEM = "NORMEXIT";
-  prog_char msg_long_9[] PROGMEM = "Complete! GRN BTN to repeat";
-  prog_char msg_short_9[] PROGMEM = "DONE";
-#else 
-  prog_char msg_long_0[] PROGMEM = "Thank you for\nchoosing\nEMotorWerks!\nBTN to CFG";
-  prog_char msg_short_0[] PROGMEM = "INIT";
-  prog_char msg_long_1[] PROGMEM = "No batt or reverse! \nANY BTN to ignore";
-  prog_char msg_short_1[] PROGMEM = "NOBATT";
-  prog_char msg_long_2[] PROGMEM = "Wrong profile!";
-  prog_char msg_short_2[] PROGMEM = "WRONGPROF";
-  prog_char msg_long_3[] PROGMEM = "BMS Stop";
-  prog_char msg_short_3[] PROGMEM = "BMSSTOP";
-  prog_char msg_long_4[] PROGMEM = "Timeout";
-  prog_char msg_short_4[] PROGMEM = "TIMEOUT";
-  prog_char msg_long_5[] PROGMEM = "Paused. RED BTN \nto exit, GRN to \nresume";
-  prog_char msg_short_5[] PROGMEM = "USRPAUSE";
-  prog_char msg_long_6[] PROGMEM = "Lost AC";
-  prog_char msg_short_6[] PROGMEM = "LOSTIN";
-  prog_char msg_long_7[] PROGMEM = "Sensor/cal error. \nRecal/chk wiring";
-  prog_char msg_short_7[] PROGMEM = "SENSEERROR";
-  prog_char msg_long_8[] PROGMEM = "Step complete";
-  prog_char msg_short_8[] PROGMEM = "NORMEXIT";
-  prog_char msg_long_9[] PROGMEM = "Complete! GRN BTN \nto repeat";
-  prog_char msg_short_9[] PROGMEM = "DONE";
-#endif
-
-PROGMEM const char *msg_long_table[] = 	  
-{   
-  msg_long_0,
-  msg_long_1,
-  msg_long_2,
-  msg_long_3,
-  msg_long_4,
-  msg_long_5, 
-  msg_long_6,
-  msg_long_7,
-  msg_long_8,
-  msg_long_9
-};
-
-PROGMEM const char *msg_short_table[] = 	  
-{   
-  msg_short_0,
-  msg_short_1,
-  msg_short_2,
-  msg_short_3,
-  msg_short_4,
-  msg_short_5, 
-  msg_short_6,
-  msg_short_7,
-  msg_short_8,
-  msg_short_9
-};
-
-const byte MSG_LCD_CELLTYPE	= 0x00;
-const byte MSG_LCD_CV = 0x01;
-const byte MSG_LCD_NCELLS = 0x02;
-const byte MSG_LCD_CAPACITY = 0x03;
-const byte MSG_LCD_CAL0 = 0x04;
-const byte MSG_LCD_CAL1 = 0x05;
-const byte MSG_LCD_CAL2 = 0x06;
-const byte MSG_LCD_CONFIRM = 0x07;
-const byte MSG_LCD_PARAMS = 0x08;
-const byte MSG_LCD_CFG = 0x09;
-const byte MSG_LCD_TOPMENU = 0x0A;
-const byte MSG_LCD_INC = 0x0B;
-const byte MSG_LCD_OUTC = 0x0C;
-const byte MSG_LCD_TOUT = 0x0D;
-const byte MSG_LCD_RUN = 0x0E;
-const byte MSG_LCD_BLANK = 0x0F;
-
-#ifndef LCD_SPE
-  prog_char msg_lcd_0[] PROGMEM = "Cell Type:       ";
-  prog_char msg_lcd_1[] PROGMEM = "CV cutoff:       ";
-  prog_char msg_lcd_2[] PROGMEM = "Number of cells: ";
-  prog_char msg_lcd_3[] PROGMEM = "Capacity:        ";
-  prog_char msg_lcd_4[] PROGMEM = "Calibrated zero";
-  prog_char msg_lcd_5[] PROGMEM = "Connect batt. BTN to skip";
-  prog_char msg_lcd_6[] PROGMEM = "Enter actual batt voltage:";
-  prog_char msg_lcd_7[] PROGMEM = "Confirm:      ";
-  prog_char msg_lcd_8[] PROGMEM = "Params      ";
-  prog_char msg_lcd_9[] PROGMEM = "press BTN to adjust";
-  prog_char msg_lcd_10[] PROGMEM = "Action:                   ";
-  prog_char msg_lcd_11[] PROGMEM = "max INput current ";
-  prog_char msg_lcd_12[] PROGMEM = "max OUTput current";
-  prog_char msg_lcd_13[] PROGMEM = "timeout (#min or 0):";
-  prog_char msg_lcd_14[] PROGMEM = "Confirm CHARGE:";
-  prog_char msg_lcd_15[] PROGMEM = "[           ]";
-#else
-  prog_char msg_lcd_0[] PROGMEM = "Cell Type:       ";
-  prog_char msg_lcd_1[] PROGMEM = "CV cutoff:       ";
-  prog_char msg_lcd_2[] PROGMEM = "Number of cells: ";
-  prog_char msg_lcd_3[] PROGMEM = "Capacity:        ";
-  prog_char msg_lcd_4[] PROGMEM = "Calibrated zero";
-  prog_char msg_lcd_5[] PROGMEM = "Connect batt. BTN \nto skip";
-  prog_char msg_lcd_6[] PROGMEM = "Enter actual \nbatt voltage:";
-  prog_char msg_lcd_7[] PROGMEM = "Confirm:      ";
-  prog_char msg_lcd_8[] PROGMEM = "Params      ";
-  prog_char msg_lcd_9[] PROGMEM = "press BTN to\nadjust";
-  prog_char msg_lcd_10[] PROGMEM = "Action:                   ";
-  prog_char msg_lcd_11[] PROGMEM = "max INput current ";
-  prog_char msg_lcd_12[] PROGMEM = "max OUTput current";
-  prog_char msg_lcd_13[] PROGMEM = "timeout (#min or 0):";
-  prog_char msg_lcd_14[] PROGMEM = "Confirm CHARGE:";
-  prog_char msg_lcd_15[] PROGMEM = "[           ]";
-#endif
-
-PROGMEM const char *msg_lcd_table[] = 	  
-{   
-  msg_lcd_0,
-  msg_lcd_1,
-  msg_lcd_2,
-  msg_lcd_3,
-  msg_lcd_4,
-  msg_lcd_5,
-  msg_lcd_6,
-  msg_lcd_7,
-  msg_lcd_8,
-  msg_lcd_9,
-  msg_lcd_10,
-  msg_lcd_11,
-  msg_lcd_12,
-  msg_lcd_13,
-  msg_lcd_14,
-  msg_lcd_15
-};
-//=========================== end define messages ==================================
-
-
-//---------------- pin-out constants ----------------
-//========== analog pins
-const byte pin_C=0; // output current pin
-const byte pin_bV=1; // output / battery voltage pin
-const byte pin_heatSinkT=2; // charger heatsink temp - for thermal derating 
-const byte pin_12Vsense=3; // implementing undervoltage protection
-const byte pin_temp2=4; // 4 - spare prewired as temp input
-const byte pin_mV=5;
-// const byte pin_mC=7; // will only work in V12+ control boards (June 2013). needed only for full digital PFC control
-//========== digital pins
-// 0/1 reserved for serial comms with display etc
-const byte pin_pwrCtrlButton=2; // this is wired to the button (used for menu step)
-const byte pin_pwrCtrl2Button=3; // this is wired to the button2 (used for menu select)
-const byte pin_inrelay=4; // precharges input caps - normally pin 4, in some units pin 6 running fan relay
-const byte pin_outrelay=5; // output relay - this is needed for CHAdeMO
-const byte pin_DELTAQ=6; // deltaQ pin
-const byte pin_J1772=7; // J1772 pilot input. 1k is hardwired on V14+ pcbs so J1772 will power on on connect
-const byte pin_fan=8; // fan control - this is pin4 in all kits shipped before Mar '12
-const byte pin_PWM=9; // main PWM pin
-
-// max current reference voltage (using PWM) -  was 6 in the V13 pcb (kits shipped before March 2012)
-// now moved to pin 10 so that we can use higher PWM frequency 20kHz PWM
-const byte pin_maxC=10; 
-
-const byte pin_EOC=12; // end-of-charge output (see pinout diagram) - pulled low when charge is complete
-
-// end-of-charge input from BMS. Pull low / disconnect from positive TTL signal to activate
-//     (normallly will be realized via connecting NC BMS loop between this pin and EOC pin (or +5V)
-const byte pin_BMS=13; 
-//---------------- END PINOUTS -----------------------
-
-
-//============= BATTERY INFO  =====
-struct config_t {
-  int nCells;
-  int AH;
-  int CV; // per cell
-  int CC; // max output current
-  int mainsC; // max input current
-  // sensor config
-  float Vcal;
-  float Vcal_k;
-  float mVcal;
-  float Ccal;
-} configuration;
-
-
-//---------------- MAX CURRENTS
-// absolute maximum average output current (used in CV mode) - leave at 0 here - will be set via power menu
-const float min_CV_Crating=0.05; // wait until the current goes to XC (use values from your battery's datasheet)
-const float Cstep=0.5; // how quickly the current tapers off in CV step - A / second. cannot be too high to prevent false stops
-byte CVreached=0;
-float maxOutC=0., maxOutC1=0;
-int n=0;
-const float peakMaxC=1.8; // ratio between the average and max current in the inductor before overcurrent kicks in
-
-#ifdef debugpower // increase power limits for testing runs - careful!
-  const float absMaxChargerCurrent=300; // 300A...
-  const float absMaxChargerPower=50000; // 50kW...
-#else
-  #ifdef MCC100A
-    const float absMaxChargerCurrent=99; // 99A (need to be a 2-digit number!) rating with high-current output toroid inductor
-  #else
-    const float absMaxChargerCurrent=70; // 70A default rating with new toroid inductors
-  #endif
-  
-  #ifdef PFCdirect
-    const float absMaxChargerPower=25000; // 25kW rating for PFCDirect units with new 5-6" toroid inductors
-  #else
-    const float absMaxChargerPower=12000; // 12kW rating for regular units with new 4" toroid inductors
-  #endif
-#endif
-
-// input currents (used only for DC-DC units (if DCinput switch is active)
-#ifdef DCinput
-  const float MAXinputC=absMaxChargerCurrent;
-#endif
-
-//------------- THERMAL DERATING OF CHARGER 
-// for now, simple protection by pausing charger until cooldown to certain temp
-// note that heatSink temp at the point of measurement is generally 20-30 deg C LOWER than temperature 
-// of critical components attached to heatsink (due to distance from components to probe)
-// use maxHeatSinkT of <60 to ensure <85 deg C temp of components
-// this assumes thermistor placement near the heat generating components
-// BTW, modest airflow (a single 120mm PC fan) with a large (8x10x3" heatsink should be sufficient for 
-// up to 30A output at max power 
-#ifndef MCC100A
-  const byte maxHeatSinkT=55; // in Centigrades - will start derating here
-#else
-  const byte maxHeatSinkT=47; // more aggressive derating at high current output
-#endif
-const byte ABSmaxHeatSinkT=85; // in Centigrades - will stop the charger altogether here
-const byte midHeatSinkT=45; // turn on the fans here; also wait until cool down to this temp before resuming at the prev power level 
-const byte lowHeatSinkT=35; // turn off the fans here 
-//--------------------------------------------------------
-
-const float Aref=5.0; // 5V for ATMega328 (Pro Mini), 3.3V for ATSAM (Due) 
-
-//=============== voltage dividers settings ===========================
-//--------- some constants for 7520 chips
-const float gain_7520=5./0.512*0.99; // calculate effective gain (Vcc/0.512 per datasheet, plus 1% correction for input resistance)
-const float lowerR0_V_7520=2.7;
-
-//--------- mains voltage 
-// INPUT side constants
-float divider_k_mV=-1.; 
-#ifdef A7520_mV
-  // resistor from -5V regulator; should form a ~-.25V divider together with the 
-  // bottom resistor => >20x * bottom resistor 
-  // for 2.7k bottom 3resistor, pick between 60k and 82k; 68k is a good choice... 
-  const float V_o_mV0=2.5-5.*lowerR0_V_7520/68.*gain_7520; // -5V input, 2.7k bottom resistor, 9.76 gain; // ~2.5V for A7520
-  const float lowerR0_mV=lowerR0_V_7520*gain_7520; // +-0.256V range for input, ~10x gain, 2.7k bottom resistor
-  const float lowerR_mV=lowerR0_mV;
-#else
-  const float V_o_mV0=0;
-  const float lowerR_mV=23.79; // 1/(1/27.+1/200.) - in parallel with ISO124 input resistance of 200k
-#endif
-float V_o_mV=V_o_mV0; // need to reassign to non-const as it will be adjusted below
-
-//--------- battery voltage 
-// OUTPUT side constants
-float divider_k_bV=-1.;
-#ifdef A7520_V
-  // resistor from -5V regulator; should form a ~-.25V divider together with the 
-  // bottom resistor => >20x * bottom resistor 
-  // for 2.7k bottom resistor, pick between 60k and 82k; 68k is a good choice... 
-  const float V_o_bV0=2.5-5.*lowerR0_V_7520/68.*gain_7520; // -5V input, 2.7k bottom resistor, 9.76 gain; // ~2.5V for A7520
-  const float lowerR0_bV=lowerR0_V_7520*gain_7520;   // +-0.256V range for input, Vref/0.512x gain
-  const float lowerR_bV=lowerR0_bV;
-#else
-  const float V_o_bV0=0;
-  const float lowerR_bV=23.79; // in parallel with 200k input resistance of the iso124
-#endif
-float V_o_bV=V_o_bV0; // need to reassign to non-const as it will be adjusted below
-//==================================== end voltage dividers setup =========================
-
-//=================================== charger current sensor ==============================
-// V/A constant for the charger output current sensor 
-float V_o_C=
-#ifdef OUTC_SENSOR_Allegro_100U
-                  0.6; // allegros are 0.6
-#else
-                  2.5; // tamuras are 2.5
-#endif
-
-// sensitivity of the sensor
-const float k_V_C=
-#ifdef OUTC_SENSOR_Tamura_50B
-                  0.03;
-#endif
-#ifdef OUTC_SENSOR_Tamura_150B
-                  0.01;
-#endif
-#ifdef OUTC_SENSOR_Tamura_600B
-                  0.0025;
-#endif
-#ifdef OUTC_SENSOR_Allegro_100U
-                  0.04;
-#endif
-//=================================== END charger current sensor ==========================
+int n = 0; //what the flying hell is n?!?
 
 //===================== charger cycle timers =====================================
-// when changing stepDelay, keep stepDelay*measCycle_len within 0.5-1 sec
-const byte stepDelay=30; // primary charger loop delay in milliseconds - should be less than 50 in order to run QC loop properly
-const byte measCycle_len=15; // how many primary loop cycles per display cycle 
-const byte AVGCycles=10; // how many readings of C,V,T (taken every 4ms)  to average for reporting (to CHAdeMO) and display
-const byte stopCycles=5; // how many primary charger cycles to require stop condition to exist before exiting
-const byte CV_timeout=20; // what is the max duration (in secs) CV loop is allowed to spend below C stop; should be > ramp time of charger
-byte breakCnt=0;
-byte breakCycle=0;
-//===================== end charger cycle timers =================================
+uint8_t breakCnt=0;
+uint8_t breakCycle=0;
 
-unsigned long timer=0, timer_ch=0, timer_comm=0, timer_irq=0, deltat=0;
-unsigned int sec_up=0;
+uint32_t timer=0, timer_ch=0, timer_comm=0, timer_irq=0, deltat=0;
+uint32_t sec_up = 0;
 
 float mainsV=0, outV=0, outC=0;
 float AH_charger=0;
-char str[64];
 
-byte charger_run=0;
-byte state;
-byte normT=0;
-const byte minMains=30; // min mains voltage to (1) test sensor connectivity and (2) detect mains disconnect 
-int timeOut=0; // in min, 0 means no timeout
+uint8_t charger_run=0;
+uint8_t state;
+uint8_t normT=0;
+
+int32_t timeOut=0; // in min, 0 means no timeout
 float maxOutV=0; // absolute maximum output voltage - will be set later in the code
 float maxMainsC=0; // allowed charger power - will be changed in code
 
@@ -532,8 +114,8 @@ float maxMainsC=0; // allowed charger power - will be changed in code
 //---------------------------------------------------------------------------------------------------------
 // all these have to be ints or very unpleasant wrapping will occur in PID loop 
 // having these unsigned has cost EmotorWerks over $1,000 in parts during testing ;-)
-int targetC_ADC=0; // this is an ADC reference point for our output current
-int outC_ADC_0=0, outC_ADC=0, outV_ADC=0, outmV_ADC=0, T_ADC=0, T2_ADC=0;
+int32_t targetC_ADC=0; // this is an ADC reference point for our output current
+int32_t outC_ADC_0 = 0, outC_ADC = 0, outV_ADC = 0, outmV_ADC = 0, T_ADC = 0, T2_ADC = 0;
 float outC_ADC_f=0;
 
 // ADC interrput handler
@@ -553,7 +135,7 @@ ISR(ADC_vect) { // Analog->Digital Conversion Complete
   // for most variable, average 2 values offset 180 degrees wrt haversine wave
   // for current measurement, average 16 measurements over 8ms, or one full haversine period
   switch(ADMUX & B00000111) {
-   case pin_C: { // this is measured at 2kHz frequency
+   case pin_C:  // this is measured at 2kHz frequency
      if(outC_ADC==0) {
        outC_ADC_f=outC_ADC=val;
      } else {
@@ -561,41 +143,36 @@ ISR(ADC_vect) { // Analog->Digital Conversion Complete
        outC_ADC_f=(outC_ADC_f*15+val)/16; // this emulates an RC filter with time constant of ~half of averaged periods
        outC_ADC=int(outC_ADC_f);
      }
-     break;
-   }
+     break;   
    // rest of vars measured at 250Hz
-   case pin_bV: {
+   case pin_bV: 
      if(outV_ADC==0) {
        outV_ADC=val;
      } else {
        outV_ADC=(outV_ADC+val)/2;
      }
-     break;
-   }
-   case pin_mV: {
+     break;   
+   case pin_mV: 
      if(outmV_ADC==0) {
        outmV_ADC=val;
      } else {
        outmV_ADC=(outmV_ADC+val)/2;
      }
      break;
-   }
-   case pin_heatSinkT: {
+   case pin_heatSinkT: 
      if(T_ADC==0) {
        T_ADC=val;
      } else {
        T_ADC=(T_ADC+val)/2;
      }
      break;
-   }
-   case pin_temp2: {
+   case pin_temp2: 
      if(T2_ADC==0) {
        T2_ADC=val;
      } else {
        T2_ADC=(T2_ADC+val)/2;
      }
      break;
-   }
    default: break;
   }
 
@@ -627,12 +204,8 @@ ISR(ADC_vect) { // Analog->Digital Conversion Complete
 // for this charger:
 // on 330V pack (LiFePo4, milli-ohm total IR), at Kp=1000, see oscillations at Hz) - hence 
 // setting Kp=, Ki=
-const long pids_Kp_SLOW=60; // revert to slow PID once the current shows up
-const long pids_Kp_FAST=300; // fast PID to start with
-long pids_Kp=0; 
-const long pids_Ki=1; // need small integral term - otherwise we get some constant offset error
-const long pids_Kd=0; // for now, just PI loop
 
+int32_t pids_Kp = 0;
 long pids_err=0, pids_perr=0, pids_i=0, pids_d=0; // all have to be signed longs in order to not screw up pid calcs
 long deltaDuty=0, milliduty=0; // have to be signed
 byte tickerPWM=0; // short counter used only to skip cycles
@@ -997,9 +570,12 @@ void loop() {
         if(LCD_on) {
           myLCD->clrScreen();
           printConstStr(0, 6, 2, 0x1f, 0x3f, 0, MSG_LCD_PARAMS);
-          sprintf(str, "IN: %dV, %dA", int(mainsV), configuration.mainsC); myLCD->printStr(1, 7, 2, 0x1f, 0x3f, 0, str);
-          sprintf(str, "OUT: %dV, %dA", int(outV), configuration.CC); myLCD->printStr(1, 8, 2, 0x1f, 0x3f, 0, str);
-          sprintf(str, "T-OUT: %d min", timeOut); myLCD->printStr(1, 9, 2, 0x1f, 0x3f, 0, str); 
+          sprintf(str, "IN: %dV, %luA", int(mainsV), configuration.mainsC); 
+		  myLCD->printStr(1, 7, 2, 0x1f, 0x3f, 0, str);
+          sprintf(str, "OUT: %dV, %luA", int(outV), configuration.CC); 
+		  myLCD->printStr(1, 8, 2, 0x1f, 0x3f, 0, str);
+          sprintf(str, "T-OUT: %li min", timeOut); 
+		  myLCD->printStr(1, 9, 2, 0x1f, 0x3f, 0, str); 
         }
         
         //======================== MAIN STATE MACHINE ======================
@@ -1014,7 +590,7 @@ void loop() {
           if(J1772_dur>50) { // noise control. also, deals with the case when no J1772 signal present at all
             configuration.mainsC=0.06*J1772_dur+3; // J1772 spec - every 100uS = 6A input - this will work up to 48A
             if(LCD_on) {
-              sprintf(str, "IN: %dV, %dA", int(mainsV), configuration.mainsC); myLCD->printStr(1, 7, 2, 0x1f, 0x3f, 0, str);
+              sprintf(str, "IN: %dV, %luA", int(mainsV), configuration.mainsC); myLCD->printStr(1, 7, 2, 0x1f, 0x3f, 0, str);
             }
           }
           
@@ -1386,52 +962,6 @@ int runChargeStep() {
 } // end runChargeStep()
 
 
-//============================ HELPER FUNCTIONS ====================================
-//================== serial comms ========================
-// message FROM the charger via serial
-void EMWserialMsg(const char *txt) {
-  Serial.print("M,");
-  Serial.print(txt);
-  Serial.println(",E");
-}
-
-// message TO the charger via serial
-// command syntax: M,ccc,vvv,sss,E
-void readSerialCmd(int *cmd_) {
-      //+++++++++++++++++++ REWRITE into either async buffer or blocking reads +++++++++++++++++++++ 
-  if(Serial.available()>0) {
-    if(Serial.read()=='M') {
-      // this is a legit command
-      Serial.read(); // dispose of comma
-      str[0]=Serial.read();
-      str[1]=Serial.read();
-      str[2]=Serial.read();
-      str[3]=0;
-      cmd_[0]=atoi(str);
-      Serial.read(); // dispose of comma
-      str[0]=Serial.read();
-      str[1]=Serial.read();
-      str[2]=Serial.read();
-      str[3]=0;
-      cmd_[1]=atoi(str);
-      Serial.read(); // dispose of comma
-      str[0]=Serial.read();
-      str[1]=Serial.read();
-      str[2]=Serial.read();
-      str[3]=0;
-      Serial.read(); // dispose of comma
-      if( Serial.read()!='E' || atoi(str)!=getCheckSum(cmd_[0], cmd_[1]) ) {
-        cmd_[0]=cmd_[1]=0;
-      }
-    }
-  }
-}
-
-int getCheckSum(int val1, int val2) {
-  return (val1+val2)%1000;
-}
-//================== END serial comms ========================
-
 
 //------------ ensure output power does not exceed other limits
 float getAllowedC(float userMaxC) {
@@ -1542,202 +1072,8 @@ byte read_T(unsigned int ADC_val) {
   return (byte)1/( log(1/(1024./ADC_val-1)) /4540.+1/298.)-273; 
 }
 
-
-//=========================================== Communication (LCD / Serial) Functions =========================
-// main parameter printing function
-void printParams(float outV, float outC, int t, float curAH, float maxC, float maxV) {
-  if(LCD_on) {
-    sprintf(str, "%s - D: %d  ", VerStr, int(milliduty/10000), 1); myLCD->printStr(0, 0, 2, 0x1f, 0x3f, 0x1f, str);      
-    sprintf(str, "I: %dV   ", int(mainsV)); myLCD->printStr(0, 3, 2, 0x1f, 0x3f, 0, str);      
-    sprintf(str, "O: %dV, %d.%dA   ", int(outV), int(outC), abs(int(outC*10)%10) ); myLCD->printStr(0, 4, 2, 0x1f, 0x3f, 0, str);      
-#ifdef DEBUG0
-    sprintf(str, "* t%d-a%d %d %d", targetC_ADC, outC_ADC, int(10000*k_V_C), int(10*V_o_C)); myLCD->printStr(1, 5, 2, 0x1f, 0, 0, str);
-#endif
-    sprintf(str, "T: %dC ", t); myLCD->printStr(0, 7, 2, 0x1f, 0, 0, str);
-    sprintf(str, "%d dAH, %u sec", int(curAH*10), sec_up); myLCD->printStr(0, 8, 2, 0x1f, 0x3f, 0, str);      
-  } else {
-    // machine-readable
-    // format: [D]uty in 0.1%, [C]urrent in 0.1A, [V]oltage in 1.0V, [T]emp in C, [O]utput AH in 0.1AH, [S]um (checksum)
-    sprintf(str, "S:D%03d,C%03d,V%03d,T%03d,O%03d,S%03d", int(milliduty/10000), int(outC*10), int(outV), t, int(curAH*10), getCheckSum(int(outC*10), int(outV)));
-    EMWserialMsg(str);
-#ifdef DEBUG1
-    sprintf(str, "S2:c%03d,v%03d,%05u", int(maxC*10), int(maxV), (unsigned int)millis());
-    EMWserialMsg(str);
-#endif
-  }
-}
-// printing primitives
-void printClrMsg(const byte msg_id, const int del, const byte red, const byte green, const byte blue) {
-  if(LCD_on) {
-    strcpy_P(str, (char*)pgm_read_word(&(msg_long_table[msg_id]))); 
-    myLCD->clrScreen();
-  } else {
-    strcpy_P(str, (char*)pgm_read_word(&(msg_short_table[msg_id]))); 
-  }
-  printMsg(str, del, 0, 2, red, green, blue);
-}
-void printConstStr(int col, int row, int font, byte red, byte green, byte blue, const byte msg_id) {
-  strcpy_P(str, (char*)pgm_read_word(&(msg_lcd_table[msg_id]))); 
-  printMsg(str, 0, col, row, red, green, blue);
-}
-void printLabel(const char * label, const byte col, const byte row, const byte red, const byte green, const byte blue) {
-  strcpy(str, label);
-  printMsg(str, 0, col, row, red, green, blue); 
-}
-void printMsg(char *str_, const int del, const byte col, const byte row, const byte red, const byte green, const byte blue) {
-  if(LCD_on) {
-    myLCD->printStr(col, row, 2, red, green, blue, str_);      
-    delay(del);
-  } else {
-    EMWserialMsg(str_);
-  }  
-}
-
-
-unsigned int MenuSelector2(byte selection_total, const char * labels[])
-{
-  byte selection = 0;
-  byte temp_selection = 1;
-  
-  printConstStr(0, 3, 2, 0x1f, 0x3f, 0x1f, MSG_LCD_BLANK);
-  printLabel(labels[temp_selection-1], 1, 3, 0x1f, 0x3f, 0x1f);
-
-  while(!selection)
-  {
-    if(digitalRead(pin_pwrCtrlButton) == HIGH)
-    {
-      ++temp_selection;
-      if(temp_selection > selection_total) temp_selection = 1;
-      printConstStr(0, 3, 2, 0x1f, 0x3f, 0x1f, MSG_LCD_BLANK);
-      printLabel(labels[temp_selection-1], 1, 3, 0x1f, 0x3f, 0x1f);
-      
-      // ideally, this should call a StatusDisplay method and simply pass selection index
-      // StatusDisplay should encapsulate all the complexities of drawing status info onto the screen
-      // alternatively myLCD can be re-purposed for this
-    }
-    else
-    if(digitalRead(pin_pwrCtrl2Button) == HIGH)
-    {
-      selection = temp_selection;
-      printConstStr(0, 3, 2, 0x1f, 0x0, 0x0, MSG_LCD_BLANK);
-      printLabel(labels[selection-1], 1, 3, 0x1f, 0x0, 0x0);
-      // similar to the above, should delegate display to StatusDisplay object
-    } 
-    delay(80);
-  }
-
-  delay(200);
-  
-  return selection - 1;
-}
-
-
-byte BtnTimeout(byte n, byte line) {
-  while(n > 0) {
-    sprintf(str, "%d sec ", n); 
-    printMsg(str, 0, 0, line, 0x1f, 0x3f, 0);
-
-    for(byte k=0; k<100; k++) {
-      if(digitalRead(pin_pwrCtrlButton)==HIGH || digitalRead(pin_pwrCtrl2Button) == HIGH) return 1;
-      delay(10);
-    }
-    --n;
-  }
-  return 0;
-}
-
-int DecimalDigitInput3(int preset)
-{
-  byte digit[3] = { preset/100, (preset/10)%10, (preset%10) };
-  byte x = 0; // 0-1-2-3-4
-  // 0x30 ascii for "0"
-  str[1] = 0x0; // eol 
-
-  while(x < 4)
-  { 
-    if(digitalRead(pin_pwrCtrlButton) == HIGH) {
-      if(x > 2) x = 0;
-      else {
-        // increment digit
-        ++digit[x];
-        // wrap at 4 (for 100s) or at 9 (for 10s and 1s) 
-        if(x == 0 && digit[x] > 4) digit[x] = 0;
-        if(digit[x] > 9) digit[x] = 0;
-      }      
-    } else 
-    if(digitalRead(pin_pwrCtrl2Button) == HIGH) {
-      ++x;
-    } 
-
-    printDigits(0, digit, 1);
-  
-    if(x < 3) {
-      // still on digits. Reprint the digit we are on in a different color now so we see what's being changed
-      str[0] = 0x30+digit[x];
-      printDigit(x, 0, str);
-    } else 
-    if(x == 3) {
-      // selection made - show all in the 'changing' color
-      printDigits(0, digit, 0);
-    }
-    
-    delay(150);
-  }
-  
-  printDigits(8, digit, 0);
-
-  return (digit[0]*100+digit[1]*10+digit[2]);
-}
-
-void printDigits(byte start, byte * digit, byte stat) {
-  str[0] = 0x30+digit[0];
-  printDigit(start++, stat, str);
-  str[0] = 0x30+digit[1];
-  printDigit(start++, stat, str);
-  str[0] = 0x30+digit[2];
-  printDigit(start, stat, str);
-}
-void printDigit(byte x, byte stat, char * str) {
-  if(stat==0) printMsg(str, 0, x, 5, 0x1f, 0x3f, 0x0); // yellow
-  if(stat==1) printMsg(str, 0, x, 5, 0x8, 0x8, 0x1f); // blue
-}
-
 int freeRam () {
   extern int __heap_start, *__brkval; 
   int v; 
   return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval); 
 }
-
-
-//========================================= GRAVEYARD ================================================
-//================================ ALL HELPER FUNCTIONS ======================
-//int runChargeStep(int cycleType, float CX, int stopType, float stopValue);
-//void stopPWM();
-//float readV(unsigned int);
-//float read_mV(unsigned int);
-//void setMaxC(float maxC);
-//float read_mC();
-//float readC(unsigned int);
-//int getNormT();
-//int read_T(unsigned int);
-//float sampleRead(byte pin);
-//float get_k_V_C(int selection);
-//float get_V_o_C(int selection);
-//void resetDelayParams();
-//void printParams(float duty, float outV, float outC, int t, float curAH, float dVdt);
-//void printConstStr(int col, int row, int font, byte red, byte green, byte blue, const byte msg_id);
-//void printClrMsg(const byte msg_id, const int del, const byte red, const byte green, const byte blue);
-//void EMWserialMsg(const char *txt);
-//void readSerialCmd(int *cmd_);
-//char *ftoa(char *a, double f, int precision);
-//void updateMovingAverages(float V);
-//unsigned int MenuSelector2(unsigned int selection_total, const char * labels[]);
-//byte isBtnPressed();
-//int BtnTimeout(int n, int line);
-//int DecimalDigitInput3(int preset);
-//void printDigits(int start, int * digit, int stat);
-//void printDigit(int x, int stat, char * str);
-//=================================== END helper functions ======================================
-
-
-
