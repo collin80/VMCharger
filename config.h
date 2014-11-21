@@ -19,13 +19,13 @@
 
 //============================== MAIN SWITCHES FOR EMotorWerks chargers =================
 #define VerStr "V16"
-//#define SmartCharge // 12kW chargers
-//#define PFC // is this a PFC unit? no need to have this when QuickCharge is selected
+#define SmartCharge // 12kW chargers
+#define PFC // is this a PFC unit? no need to have this when QuickCharge is selected
 
-#define QuickCharge // 25kW chargers - ONLY FOR AC
+//#define QuickCharge // 25kW chargers - ONLY FOR AC
 
-#define DCDC // module is used in DC-DC mode (buck or boost)
-#define DCDC_BUCK // the voltage readings are swapped
+//#define DCDC // module is used in DC-DC mode (buck or boost)
+//#define DCDC_BUCK // the voltage readings are swapped
 
 // #define SLOWPID // for universal voltage non-CHAdeMO units, slow down PID; may also be needed for any PFCDirect units due to time constant of the PFC circuit
 // ===================================================================================================
@@ -82,7 +82,7 @@
 // #define PFCdirect // is this a PFCDirect 25kW unit?
 // #define UVLO // enable gate supply undervoltage protection?
 // #define IND_Temp // do we have a second temp probe on the inductor?
-#define debugpower // doubles the power limits - careful - it may blow up your charger
+//#define debugpower // doubles the power limits - careful - it may blow up your charger
 //------------------------------- END MAIN SWITCHES STORAGE AREA ------------------------------------
 
 #define serialspeed 19200 // 115 is unstable, 38.4 is a bit unstable...

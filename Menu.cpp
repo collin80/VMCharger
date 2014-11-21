@@ -1,4 +1,5 @@
 #include "Menu.h"
+#include "avr/pgmspace.h"
 
 char str[64];
 

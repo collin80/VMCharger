@@ -35,7 +35,7 @@ class uLCD_144_SPE
 	void moveCursor(int, int);
 	void setFGcolor(byte, byte, byte);
     void printStr(int, int, int, byte, byte, byte, const char*);
-    void printStr(int, int, int, byte, byte, byte, const prog_char*, int); // has to be prog_char in pre-1.0, __FlashStringHelper after
+    void printStr(int, int, int, byte, byte, byte, const char*, int); // has to be const char in pre-1.0, __FlashStringHelper after
 };
 #endif
 //================================ END SCREEN FUNCTION LIBRARY ========================
