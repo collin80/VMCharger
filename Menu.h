@@ -3,8 +3,6 @@
 
 #include <Arduino.h>
 #include "config.h"
-#include "constants.h"
-#include "globals.h"
 
 #ifdef LCD_SPE
 #include "uLCD_144_SPE.h"
@@ -27,5 +25,8 @@ void printDigit(uint8_t x, uint8_t stat, char * str);
 void EMWserialMsg(const char *txt);
 void readSerialCmd(int *cmd_);
 int getCheckSum(int val1, int val2);
+bool getSerialCmd();
+void pollSerial();
+bool processSerial();
 
 #endif

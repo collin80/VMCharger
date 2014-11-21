@@ -1,7 +1,14 @@
 #include "Menu.h"
 #include "avr/pgmspace.h"
+#include "config.h"
+#include "constants.h"
+#include "globals.h"
+#include "ConfigStruct.h"
+#include "ValueTranslators.h"
 
 char str[64];
+char SerialStr[SerialStrSize+2]; // buffer for the serial command
+char SerialCommand[SerialStrSize+2]; // this is where the command will actually be stored
 
 //================== serial comms ========================
 // message FROM the charger via serial
@@ -9,6 +16,30 @@ void EMWserialMsg(const char *txt) {
   Serial.print("M,");
   Serial.print(txt);
   Serial.println(",E");
+}
+
+bool getSerialCmd() 
+{
+	// serial control of the charger is enabled
+    configuration.mainsC=300; // remove limit on input side?
+    sprintf(str, "R:M%03d,V%03d,c%03d,v%03d", int(mainsV), int(outV), int(configuration.CC), int(maxOutV));
+    EMWserialMsg(str); // send 'ready' status - expect controller to respond within 200ms
+
+    // listen to commands - format 'M,ccc,vvv,sss,E' where sss is a checksum
+    cmd[0]=cmd[1]=0; // reset all
+    readSerialCmd(cmd);
+          
+    if(cmd[0]>0 && cmd[1]>0) {
+        // echo reception
+        sprintf(str, "E:%d,%d", cmd[0], cmd[1]);
+        sprintf(SerialCommand, "M,%03d,%03d,%03d,E", cmd[0], cmd[1], getCheckSum(cmd[0], cmd[1]) );
+        EMWserialMsg(str);
+        configuration.CC=cmd[0];
+        maxOutV=cmd[1];     
+        // move to charge stat
+        return true;
+     } 
+	return false;
 }
 
 // message TO the charger via serial
@@ -41,6 +72,60 @@ void readSerialCmd(int *cmd_) {
       }
     }
   }
+}
+
+void pollSerial() 
+{
+	static byte si=0; // serial command byte counter
+	while(Serial.available()) {
+        str[0]=Serial.read();
+        if(str[0]=='M') si=0; // reset to the beginning of command
+        if(si<SerialStrSize-1) {
+          SerialStr[si++]=str[0];
+        } else {
+          SerialStr[SerialStrSize-1]=0; // this is supposed to be the end of the command
+          if(str[0]=='E') strcpy(SerialCommand, SerialStr);
+          si=0;
+        }
+    }
+}
+
+bool processSerial() 
+{
+	cmd[0]=cmd[1]=0; // reset all
+    str[0]=SerialCommand[2]; // skipping 'M,'
+    str[1]=SerialCommand[3];
+    str[2]=SerialCommand[4];
+    str[3]=0;
+    cmd[0]=atoi(str);
+    str[0]=SerialCommand[6]; // skipping ','
+    str[1]=SerialCommand[7];
+    str[2]=SerialCommand[8];
+    str[3]=0;
+    cmd[1]=atoi(str);
+    str[0]=SerialCommand[10]; // skipping ','
+    str[1]=SerialCommand[11];
+    str[2]=SerialCommand[12];
+    str[3]=0;
+    if(atoi(str)!=getCheckSum(cmd[0], cmd[1])) { // checksum did not check out
+		cmd[0]=0;
+        cmd[1]=0;
+    }
+    if(cmd[0]>1 && cmd[1]>1) {
+		// valid output power command
+        maxOutV=cmd[1];
+        maxOutC=maxOutC1=getAllowedC(cmd[0]); // this also allows for temp derating
+    } else {
+		// could be a special command
+        // 'M,001,000,001,E' is STOP 
+        if(cmd[0]==1 && cmd[1]==0) {
+			PWM_enable_=0;
+            return false; // full stop
+        }
+    }
+    // send status now - this is ~45 symbols. At 19200 bps, this is  ~30ms
+    printParams(outV, outC, normT, AH_charger, maxOutC1, maxOutV);
+	return true;
 }
 
 int getCheckSum(int val1, int val2) {

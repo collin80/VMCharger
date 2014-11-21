@@ -57,8 +57,6 @@ All rights reserved. Copyright 2014
  
 uint8_t PWM_enable_ = 0; //by default disable PWM output until we are really ready for it
 
-char SerialStr[SerialStrSize+2]; // buffer for the serial command
-char SerialCommand[SerialStrSize+2]; // this is where the command will actually be stored
 extern char str[64]; //temporary storage buffer
 float maxOutC = 0., maxOutC1 = 0;
 float V_o_mV = V_o_mV0; // need to reassign to non-const as it will be adjusted below
@@ -84,7 +82,9 @@ float V_o_C =
 #include "uLCD_144.h"
   uLCD_144 *myLCD;
 #endif
+
 uint8_t LCD_on=0; // this defines manual vs serial-controlled operation
+
 int cmd[2]={0, 0}; // command variables, used in serial comms
 
 int n = 0; //what the flying hell is n?!?
@@ -631,29 +631,13 @@ void loop() {
            break;
 
         case STATE_SERIALCONTROL:
-          // serial control of the charger is enabled
-          configuration.mainsC=300; // remove limit on input side?
-          sprintf(str, "R:M%03d,V%03d,c%03d,v%03d", int(mainsV), int(outV), int(configuration.CC), int(maxOutV));
-          EMWserialMsg(str); // send 'ready' status - expect controller to respond within 200ms
-
-          // listen to commands - format 'M,ccc,vvv,sss,E' where sss is a checksum
-          cmd[0]=cmd[1]=0; // reset all
-          readSerialCmd(cmd);
-          
-          if(cmd[0]>0 && cmd[1]>0) {
-            // echo reception
-            sprintf(str, "E:%d,%d", cmd[0], cmd[1]);
-            sprintf(SerialCommand, "M,%03d,%03d,%03d,E", cmd[0], cmd[1], getCheckSum(cmd[0], cmd[1]) );
-            EMWserialMsg(str);
-            configuration.CC=cmd[0];
-            maxOutV=cmd[1];     
-            // move to charge stat
-            state=STATE_CHARGE;
-          } else {
-            delay(200); // wait a bit and do another check for a command - cannot wait too long due to QC timing. 
-          }
-          break;
-         
+			if (getSerialCmd()) {
+				state=STATE_CHARGE;
+			} else {
+				delay(200); // wait a bit and do another check for a command - cannot wait too long due to QC timing. 
+			}
+			break;
+    
          case STATE_CHARGE: 
            // cannot delay from here to charging function QC operation requires quick ramp after the command
            // write out the configuration to EEPROM for next time
@@ -775,7 +759,6 @@ int runChargeStep() {
   PWM_enable_=1;
   
   //============================================== MAIN CHARGER LOOP =============================================
-  byte si=0; // serial command byte counter
   
   while(1) {
     // NOTE THAT outC / outV readings are all set in the interrupts
@@ -788,17 +771,7 @@ int runChargeStep() {
           +V_o_C)/Aref;
 
     if(!LCD_on) {
-      while(Serial.available()) {
-        str[0]=Serial.read();
-        if(str[0]=='M') si=0; // reset to the beginning of command
-        if(si<SerialStrSize-1) {
-          SerialStr[si++]=str[0];
-        } else {
-          SerialStr[SerialStrSize-1]=0; // this is supposed to be the end of the command
-          if(str[0]=='E') strcpy(SerialCommand, SerialStr);
-          si=0;
-        }
-      }
+		pollSerial(); //reads in serial data if there is some waiting
     }
     
     // process serial commands and print out status only every 50ms or so
@@ -825,40 +798,8 @@ int runChargeStep() {
     
       // if in Serial mode, check for commands here
       if(!LCD_on) {
-        cmd[0]=cmd[1]=0; // reset all
-        str[0]=SerialCommand[2]; // skipping 'M,'
-        str[1]=SerialCommand[3];
-        str[2]=SerialCommand[4];
-        str[3]=0;
-        cmd[0]=atoi(str);
-        str[0]=SerialCommand[6]; // skipping ','
-        str[1]=SerialCommand[7];
-        str[2]=SerialCommand[8];
-        str[3]=0;
-        cmd[1]=atoi(str);
-        str[0]=SerialCommand[10]; // skipping ','
-        str[1]=SerialCommand[11];
-        str[2]=SerialCommand[12];
-        str[3]=0;
-        if(atoi(str)!=getCheckSum(cmd[0], cmd[1])) { // checksum did not check out
-          cmd[0]=0;
-          cmd[1]=0;
-        }
-        if(cmd[0]>1 && cmd[1]>1) {
-          // valid output power command
-          maxOutV=cmd[1];
-          maxOutC=maxOutC1=getAllowedC(cmd[0]); // this also allows for temp derating
-        } else {
-          // could be a special command
-          // 'M,001,000,001,E' is STOP 
-          if(cmd[0]==1 && cmd[1]==0) {
-            PWM_enable_=0;
-            return 0; // full stop
-          }
-        }
-        // send status now - this is ~45 symbols. At 19200 bps, this is  ~30ms
-        printParams(outV, outC, normT, AH_charger, maxOutC1, maxOutV);
-      } else {        
+		if (!processSerial()) return 0;
+	  } else {        
         // slow voltage control cycle here. AT Cstep=0.5A default, we are ramping down at ~5A/second
         // this may not be enough to avoid a bit of overvoltage beyond CV
         // need to do it ONLY for non-serial control as in serial control the charger is a slave
@@ -998,78 +939,6 @@ float getAllowedC(float userMaxC) {
   } // end thermal management            
 
   return userMaxC;
-}
-
-void setMaxC(float maxC) {
-#ifdef NEG_CSENSE
-  // hardware limits in case of opposite direction of the sensor
-  Timer1.setPwmDuty(pin_maxC, 1023); // need something more than 3 volts as zero-current output is 2.5V...
-#else
-  Timer1.setPwmDuty(pin_maxC, 1024./Aref*(V_o_C+k_V_C*maxC));
-#endif
-}
-
-
-//============================ current readout functions =====================
-//------------ calc current value from ADC value
-float readC() {
-  return (Aref/1024.*outC_ADC-V_o_C)/k_V_C
-#ifdef NEG_CSENSE
-          *-1
-#endif
-          ;
-}
-
-//============================ voltage readout functions =====================
-// output voltage
-float readV() {  
-  return (Aref/1024.*
-#ifdef DCDC_BUCK // output voltage is lV in case of buck
-          outmV_ADC
-#else 
-          outV_ADC
-#endif
-          -V_o_bV)*divider_k_bV;
-}
-
-// input voltage
-float read_mV() {
-#ifdef PC817 
-  // 3V is a threashold between 120V and 240V - but may require adjustment on a per-unit basis
-  if(Aref/1024.*outmV_ADC < 3) return 240;
-  return 120;
-#endif
-
-  return (Aref/1024.*
-#ifdef DCDC_BUCK // input voltage is hV in case of buck
-          outV_ADC
-#else 
-          outmV_ADC
-#endif
-          -V_o_mV)*divider_k_mV
-#ifndef DCinput
-          /1.41
-#endif
-          ;
-}
-//============================ end voltage readout functions =====================
-
-
-//====================== temperature readout functions ===========================
-// compute the equivalent (normalized) charger temp
-byte getNormT() {
-  // assume max sink T is 55, max t2 (inductor) is 85 - approx but reasonably close to reality
-  // therefore need to rescale t2 by 55/85=0.65
-  // BUT ONLY IF WE HAVE THIS SECONDARY MEASUREMENT
-#ifdef IND_Temp
-  return max(read_T(T_ADC), read_T(T2_ADC)*0.65);
-#else
-  return read_T(T_ADC);
-#endif
-}
-// master temp readout, using formulas from http://en.wikipedia.org/wiki/Thermistor
-byte read_T(unsigned int ADC_val) {
-  return (byte)1/( log(1/(1024./ADC_val-1)) /4540.+1/298.)-273; 
 }
 
 int freeRam () {
