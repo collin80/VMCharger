@@ -1,5 +1,8 @@
 #include "config.h"
-//Evil global variables shared by various code sections. Refactor to classes and remove these things.
+
+//global variables shared by various code sections. Refactor to classes and remove these things.
+//There are a lot of globals here which is certainly not proper form (not that it is strictly evil just frowned upon)
+
 extern uint8_t LCD_on;
 extern int32_t milliduty;
 extern float mainsV;

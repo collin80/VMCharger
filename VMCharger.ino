@@ -547,15 +547,6 @@ void loop() {
   //         (2) has been run over a week ago
   //         (3) green button is pressed to override
   if(LCD_on==0 || digitalRead(pin_pwrCtrl2Button)==HIGH || charger_run==0) {
-      //----------------------------
-      // run state machine:
-      const byte STATE_TOP_MENU = 0x00;
-      const byte STATE_CONFIG_PWR = 0x01;
-      const byte STATE_CONFIG_TIMER = 0x02;
-      const byte STATE_CHARGE = 0x04;
-      const byte STATE_WAIT_TIMEOUT = 0x05;
-      const byte STATE_SERIALCONTROL = 0x10;
-      const byte STATE_SHUTDOWN = 0xff;
       if(!LCD_on) {
         // drop us directly into a serial control loop
         state=STATE_SERIALCONTROL;
