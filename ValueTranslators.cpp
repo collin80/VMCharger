@@ -3,9 +3,12 @@
 #include "globals.h"
 #include "config.h"
 #include "constants.h"
+#include "Menu.h"
 
 //------------ ensure output power does not exceed other limits
 float getAllowedC(float userMaxC) {
+	char str[64];
+
   userMaxC=min(userMaxC, absMaxChargerPower/maxOutV );
   userMaxC=min(userMaxC, absMaxChargerCurrent); 
   userMaxC=min(userMaxC, maxMainsC*mainsV/maxOutV);
@@ -39,15 +42,6 @@ float getAllowedC(float userMaxC) {
   } // end thermal management            
 
   return userMaxC;
-}
-
-void setMaxC(float maxC) {
-#ifdef NEG_CSENSE
-  // hardware limits in case of opposite direction of the sensor
-  Timer1.setPwmDuty(pin_maxC, 1023); // need something more than 3 volts as zero-current output is 2.5V...
-#else
-  Timer1.setPwmDuty(pin_maxC, 1024./Aref*(V_o_C+k_V_C*maxC));
-#endif
 }
 
 

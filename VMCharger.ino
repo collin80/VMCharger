@@ -52,9 +52,12 @@ All rights reserved. Copyright 2014
 #include "EEPROM_VMcharger.h"
 #include "TimerOne.h"
 #include "Menu.h"
+#include "ValueTranslators.h"
 
 //some of these lines are still left here because I don't yet know or haven't decided what to do with them. FIX IT.
  
+struct config_t configuration;
+
 uint8_t PWM_enable_ = 0; //by default disable PWM output until we are really ready for it
 
 extern char str[64]; //temporary storage buffer
@@ -902,47 +905,17 @@ int runChargeStep() {
   return 0;
 } // end runChargeStep()
 
-
-
-//------------ ensure output power does not exceed other limits
-float getAllowedC(float userMaxC) {
-  userMaxC=min(userMaxC, absMaxChargerPower/maxOutV );
-  userMaxC=min(userMaxC, absMaxChargerCurrent); 
-  userMaxC=min(userMaxC, maxMainsC*mainsV/maxOutV);
-  
-  // check thermal 
-  if(normT>=maxHeatSinkT) {
-    // start derating
-    // map 0-100% derating (relative to the current max current) to 
-    // maxHeatSinkT-ABSmaxHeatSinkT heatsink range
-    userMaxC=userMaxC*abs(ABSmaxHeatSinkT-normT)/(ABSmaxHeatSinkT-maxHeatSinkT);
-    
-    if(normT>ABSmaxHeatSinkT) {
-      // overheating, stop charger, wait until temp drops enough to restart
-      PWM_enable_=0;
-      if(LCD_on) myLCD->clrScreen();        
-
-      while(1) {
-        sprintf(str, "Cool from %dC", (int)normT);
-        printMsg(str, 1000, 0, 1, 0x1F, 0, 0);
-        normT=getNormT();
-        if(normT<midHeatSinkT) {
-          if(LCD_on) myLCD->clrScreen();
-          PWM_enable_=1; // restart PWM
-          maxOutC1=userMaxC; // full power
-          break; // exit cycle when the temp drops enough
-        }
-      }
-
-    } // ABSmaxHeatSink condition   
-
-  } // end thermal management            
-
-  return userMaxC;
-}
-
 int freeRam () {
   extern int __heap_start, *__brkval; 
   int v; 
   return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval); 
+}
+
+void setMaxC(float maxC) {
+#ifdef NEG_CSENSE
+  // hardware limits in case of opposite direction of the sensor
+  Timer1.setPwmDuty(pin_maxC, 1023); // need something more than 3 volts as zero-current output is 2.5V...
+#else
+  Timer1.setPwmDuty(pin_maxC, 1024./Aref*(V_o_C+k_V_C*maxC));
+#endif
 }

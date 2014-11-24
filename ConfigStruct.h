@@ -10,4 +10,4 @@ struct config_t {
 	float Vcal_k;
 	float mVcal;
 	float Ccal;
-} configuration;
+};
