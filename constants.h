@@ -216,17 +216,16 @@ const uint8_t configMenuLen = 3;
 const uint8_t STATE_TOP_MENU = 0x00;
 const uint8_t STATE_CONFIG_PWR = 0x01;
 const uint8_t STATE_CONFIG_TIMER = 0x02;
-const uint8_t STATE_CHARGE = 0x04;
-const uint8_t STATE_WAIT_TIMEOUT = 0x05;
+const uint8_t STATE_CHARGE_START = 0x04; //charging getting set up
+const uint8_t STATE_CHARGE_LOOP = 0x05; //charging is ongoing
+const uint8_t STATE_CHARGE_FINISH = 0x06; //quit charging and set everything inert again
+const uint8_t STATE_WAIT_TIMEOUT = 0x08;
 const uint8_t STATE_SERIALCONTROL = 0x10;
+const uint8_t STATE_SETUP_CV = 0x20; //per cell voltage
+const uint8_t STATE_SETUP_CELLS = 0x21; //# of cells in pack
+const uint8_t STATE_SETUP_CAPACITY = 0x22; //capacity of pack
+const uint8_t STATE_SETUP_CALIBRATE = 0x23; // sensitivity calibration only. zero point calibration done automatically on power-on
 const uint8_t STATE_SHUTDOWN = 0xff;
-
-//these are one time setup state defines
-const uint8_t STATE_DONE = 0xff;
-const uint8_t STATE_CV = 0x1;
-const uint8_t STATE_CELLS = 0x2;
-const uint8_t STATE_CAPACITY = 0x4;
-const uint8_t STATE_CALIBRATE = 0x5; // sensitivity calibration only. zero point calibration done automatically on power-on
 
 const uint8_t MSG_THX = 0x00;
 const uint8_t MSG_NOBATT = 0x01;

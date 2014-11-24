@@ -53,8 +53,6 @@ All rights reserved. Copyright 2014
 #include "TimerOne.h"
 #include "Menu.h"
 #include "ValueTranslators.h"
-
-//some of these lines are still left here because I don't yet know or haven't decided what to do with them. FIX IT.
  
 struct config_t configuration;
 
@@ -109,6 +107,9 @@ uint8_t normT=0;
 int32_t timeOut=0; // in min, 0 means no timeout
 float maxOutV=0; // absolute maximum output voltage - will be set later in the code
 float maxMainsC=0; // allowed charger power - will be changed in code
+
+byte forceConfig=255; // default is 255 - has to be different from 0 or 1
+int J1772_dur;
 
 
 //---------------------------------------------------------------------------------------------------------
@@ -327,8 +328,8 @@ void sampleInterrupt() {
 }  // end timer interrupt
 
 
-//-------------------------------------------- START MAIN CODE ---------------------------------------------
-void setup() {
+void hardwareInit()
+{
   // digital inputs
   pinMode(pin_pwrCtrlButton, INPUT);
   pinMode(pin_pwrCtrl2Button, INPUT);
@@ -359,541 +360,578 @@ void setup() {
   Timer1.attachInterrupt(&sampleInterrupt); // attach our main ADC / PID interrupt
   delay(50); // allow interrupts to fill in all analog values 
 
-  //=================================== finalize init of the sensors =============================
-  // reset voltage dividers to account for the input resistance of ISO124
-  divider_k_mV=upperR0_mV/lowerR_mV;
-  divider_k_bV=upperR0_bV/lowerR_bV;
-  //=============================== END finalize init of the sensors =============================
-
-  //================= initialize the display ===========================================
+    //================= initialize the display ===========================================
 #ifdef LCD_SPE
   *myLCD=uLCD_144_SPE(9600);
 #else
   *myLCD=uLCD_144(9600);
 #endif
   //================= finish display init ==============================================
-  
+
+
   // check if the display started / is present
   // if not present, we will assume that the charger is controlled by serial data instead
   LCD_on=myLCD->isAlive();
+}
 
-  //==================================== ONE-TIME CONFIG =================================
-  // check if needed to go into config 
-  byte forceConfig=255; // default is 255 - has to be different from 0 or 1
-  EEPROM_readAnything(0, configuration);
-  // reset configuration if the green button is pressed at charger start
-  // on first connection, do zero cal of mainsV, as well
-  if(configuration.CC<=0 || digitalRead(pin_pwrCtrl2Button)==1) {
-    forceConfig=1; // first time running the charger after assembly
-    configuration.CV=350;
-    // set the rest of the vars
-    configuration.Vcal=0;
-    configuration.Vcal_k=1.; // prefill the calibration with unity so we don't get zero readings if calibration menu is skipped
-    configuration.mVcal=0;
-    configuration.Ccal=0;
-  }
+void loadConfig()
+{
+	// check if needed to go into config 
+	EEPROM_readAnything(0, configuration);
+	// reset configuration if the green button is pressed at charger start
+	// on first connection, do zero cal of mainsV, as well
+	if(configuration.CC<=0 || digitalRead(pin_pwrCtrl2Button)==1) {
+		forceConfig=1; // first time running the charger after assembly
+		configuration.CV=350;
+		// set the rest of the vars
+		configuration.Vcal=0;
+		configuration.Vcal_k=1.; // prefill the calibration with unity so we don't get zero readings if calibration menu is skipped
+		configuration.mVcal=0;
+		configuration.Ccal=0;
+		state = STATE_SETUP_CV; //start setup
+	}
+}
+
+//-------------------------------------------- START MAIN CODE ---------------------------------------------
+void setup() {
+
+	hardwareInit();
+
+	//=================================== finalize init of the sensors =============================
+	// reset voltage dividers to account for the input resistance of ISO124
+	divider_k_mV=upperR0_mV/lowerR_mV;
+	divider_k_bV=upperR0_bV/lowerR_bV;
+	//=============================== END finalize init of the sensors =============================
   
-  const byte STATE_DONE = 0xff;
-  const byte STATE_CV = 0x1;
-  const byte STATE_CELLS = 0x2;
-  const byte STATE_CAPACITY = 0x4;
-  const byte STATE_CALIBRATE = 0x5; // sensitivity calibration only. zero point calibration done automatically on power-on
-  state = STATE_CV;
-    
-  if(LCD_on) {  
-    myLCD->clrScreen();
-    myLCD->setOpacity(1);
-  } else {
-    state=STATE_DONE; // skip config altogether if no LCD
-    // reset serial to faster speed
-    Serial.end();
-    Serial.begin(serialspeed);
-  }    
+	state = STATE_WAIT_TIMEOUT;
+	
+	loadConfig();
+
+	if(LCD_on) {  
+		myLCD->clrScreen();
+		myLCD->setOpacity(1);
+	} else {
+		state=STATE_SERIALCONTROL; // skip config altogether if no LCD
+		// reset serial to faster speed
+		Serial.end();
+		Serial.begin(serialspeed);
+	}    
   
-  while(state != STATE_DONE)
-  {
-    switch(state)
-   {
-     case STATE_CV:
-       // if config is not forced, just timeout and send to end of config. Else, wait until button press
-       if(forceConfig==255) {
-         printClrMsg(MSG_THX, 50, 0, 0x3f, 0);
-         forceConfig=BtnTimeout(5, 7); // this will return 0 if no button pressed; 1 otherwise; 5 seconds, line #7
-       }
-       if(forceConfig==0) {
-         state=STATE_DONE;
-       } else { // forceConfig=1 here
-         myLCD->clrScreen();
-         printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_CV);
-         configuration.CV = DecimalDigitInput3(configuration.CV); 
-         state = STATE_CELLS;       
-       }
-       break;
-     case STATE_CELLS:
-       printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_NCELLS);
-       configuration.nCells = DecimalDigitInput3(configuration.nCells); 
-       state = STATE_CAPACITY;
-       break;
-     case STATE_CAPACITY:
-       printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_CAPACITY);
-       configuration.AH = DecimalDigitInput3(configuration.AH); 
-       state = STATE_CALIBRATE;       
-       break;
-     case STATE_CALIBRATE:
-       // output current zero calibration - this assumes that there is no load on startup 
-       // this is especially important for PFCdirect units which should not have anything plugged into charger output at this point!
-       outC_ADC_0=outC_ADC; // ADC reference
-       outC=readC();  
-#ifdef NEG_CSENSE
-       configuration.Ccal=-outC*k_V_C;
-#else
-       configuration.Ccal=outC*k_V_C;
-#endif
-
-       // prep for output voltage zero calibration
-       // this will generally NOT work on PFCdirect units as there is always voltage on the output
-       // to calibrate at the factory / right after build, power 12V ONLY and follow through calibration
-       outV=readV();
-       sprintf(str, "Drain %dV, BTN", int(outV));  
-       printMsg(str, 0, 0, 0, 0x1f, 0x3f, 0x00);
-       while(!(digitalRead(pin_pwrCtrlButton) || digitalRead(pin_pwrCtrl2Button)));
-       outV=readV(); // re-read after discharge
-
-       // now actual zero cal
-       if(fabs(outV)<40) { // if too far off, fault out
-         // output voltage calibration
-         configuration.Vcal=outV/divider_k_bV; 
-         V_o_bV+=configuration.Vcal; // this needs to be adjusted HERE because we are calling readV() again below for sensitivity calibration
-         printConstStr(0, 5, 2, 0x1f, 0x3f, 0x00, MSG_LCD_CAL0);
-         delay(1000);
-       }
-       
-       // now calibrate voltage sensor slope
-       // first, double-check we have reset to zero point
-       // for PFCdirect units, this will only work if ONLY 12V is powered up, no main AC connected!
-       outV=readV(); // get the readings with zero-point already calibrated
-       if(fabs(outV)<3) { // should be pretty tight after zero calibration
-         // this is a good time to also do mains calibration - assuming that on the very first power-up and forced config in general
-         // we have zero input AC voltage
-         if(forceConfig==1) {
-           mainsV=read_mV();
-           // only recal if not too far from truth
-           if(mainsV<30) {
-             configuration.mVcal=mainsV/divider_k_mV;
-           } else {
-             configuration.mVcal=0;
-           }
-         }
-         myLCD->clrScreen();
-         printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_CAL1); // this asks to connect the battery
-         delay(1000); // to avoid reading same button state as in prev step
-         while(1) {
-           outV=readV();
-           if(digitalRead(pin_pwrCtrlButton) || digitalRead(pin_pwrCtrl2Button))  break;
-           if(outV>20) { // loop until battery not connected
-             // battery has been connected, now need to wait until voltage stabilizes
-             // in units with 390R precharge, time constant is up to 4 seconds
-             // we need to wait for 4 constants (15 seconds), then close relay, measure, and open relay again
-             delay(15000); // let settle
-             digitalWrite(pin_outrelay, HIGH);
-             delay(500);
-             outV=readV(); // read settled voltage
-             digitalWrite(pin_outrelay, LOW);
-             // calibrate
-             printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_CAL2);
-             // calibration routine here - if actual voltage > shown, REDUCE the constant
-             configuration.Vcal_k=DecimalDigitInput3(int(outV))/outV;
-             break; // from while() loop
-           }
-         }
-       }
-       
-       state = STATE_DONE;
-       break;
-
-     default: break;
-   } 
-  }
-
-  // parameters calculated from config variables go here
-  // adjust core sensor constants
-  V_o_bV=V_o_bV0+configuration.Vcal;
-  V_o_mV=V_o_mV0+configuration.mVcal;
-  V_o_C+=configuration.Ccal;
-  divider_k_bV*=configuration.Vcal_k; 
-  
-  // write out the configuration to EEPROM for next time
-  EEPROM_writeAnything(0, configuration);
-
 #ifdef DEBUG1
   Serial.print("MFP: ");
   Serial.println(MEASFREQPWMPRESCALE);
 #endif
 }
   
+void displayChargeProgress()
+{
+	if(LCD_on) {
+		myLCD->clrScreen();
+		printConstStr(0, 6, 2, 0x1f, 0x3f, 0, MSG_LCD_PARAMS);
+		sprintf(str, "IN: %dV, %luA", int(mainsV), configuration.mainsC); 
+		myLCD->printStr(1, 7, 2, 0x1f, 0x3f, 0, str);
+		sprintf(str, "OUT: %dV, %luA", int(outV), configuration.CC); 
+		myLCD->printStr(1, 8, 2, 0x1f, 0x3f, 0, str);
+		sprintf(str, "T-OUT: %li min", timeOut); 
+		myLCD->printStr(1, 9, 2, 0x1f, 0x3f, 0, str); 
+	}
+}
 
-void loop() {  
-  // ---------------real loop()
-  byte x=255; // default, has to be different from 0 or 1
-  int J1772_dur;
+void setupCV()
+{
+	myLCD->clrScreen();
+	printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_CV);
+	configuration.CV = DecimalDigitInput3(configuration.CV); 
+	state = STATE_SETUP_CELLS;       
+}
 
-  mainsV=read_mV();
-  outV=readV();
+void setupCells()
+{
+	printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_NCELLS);
+	configuration.nCells = DecimalDigitInput3(configuration.nCells); 
+	state = STATE_SETUP_CAPACITY;
+}
+
+void setupCapacity()
+{
+	printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_CAPACITY);
+	configuration.AH = DecimalDigitInput3(configuration.AH); 
+	state = STATE_SETUP_CALIBRATE;       
+}
+
+// output current zero calibration - this assumes that there is no load on startup 
+// this is especially important for PFCdirect units which should not have anything plugged into charger output at this point!
+void setupCalibration()
+{
+	outC_ADC_0=outC_ADC; // ADC reference
+	outC=readC();  
+#ifdef NEG_CSENSE
+	configuration.Ccal=-outC*k_V_C;
+#else
+	configuration.Ccal=outC*k_V_C;
+#endif
+
+	// prep for output voltage zero calibration
+	// this will generally NOT work on PFCdirect units as there is always voltage on the output
+	// to calibrate at the factory / right after build, power 12V ONLY and follow through calibration
+	outV=readV();
+	sprintf(str, "Drain %dV, BTN", int(outV));  
+	printMsg(str, 0, 0, 0, 0x1f, 0x3f, 0x00);
+	while(!(digitalRead(pin_pwrCtrlButton) || digitalRead(pin_pwrCtrl2Button)));
+	outV=readV(); // re-read after discharge
+
+	// now actual zero cal
+	if(fabs(outV)<40) { // if too far off, fault out
+		// output voltage calibration
+		configuration.Vcal=outV/divider_k_bV; 
+		V_o_bV+=configuration.Vcal; // this needs to be adjusted HERE because we are calling readV() again below for sensitivity calibration
+		printConstStr(0, 5, 2, 0x1f, 0x3f, 0x00, MSG_LCD_CAL0);
+		delay(1000);
+	}
+       
+	// now calibrate voltage sensor slope
+	// first, double-check we have reset to zero point
+	// for PFCdirect units, this will only work if ONLY 12V is powered up, no main AC connected!
+	outV=readV(); // get the readings with zero-point already calibrated
+	if(fabs(outV)<3) { // should be pretty tight after zero calibration
+		// this is a good time to also do mains calibration - assuming that on the very first power-up and forced config in general
+		// we have zero input AC voltage
+		if(forceConfig==1) {
+			mainsV=read_mV();
+			// only recal if not too far from truth
+			if(mainsV<30) {
+				configuration.mVcal=mainsV/divider_k_mV;
+			} else {
+				configuration.mVcal=0;
+			}
+		}
+		myLCD->clrScreen();
+		printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_CAL1); // this asks to connect the battery
+		delay(1000); // to avoid reading same button state as in prev step
+		while(1) {
+			outV=readV();
+			if(digitalRead(pin_pwrCtrlButton) || digitalRead(pin_pwrCtrl2Button))  break;
+			if(outV>20) { // loop until battery not connected
+				// battery has been connected, now need to wait until voltage stabilizes
+				// in units with 390R precharge, time constant is up to 4 seconds
+				// we need to wait for 4 constants (15 seconds), then close relay, measure, and open relay again
+				delay(15000); // let settle
+				digitalWrite(pin_outrelay, HIGH);
+				delay(500);
+				outV=readV(); // read settled voltage
+				digitalWrite(pin_outrelay, LOW);
+				// calibrate
+				printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_CAL2);
+				// calibration routine here - if actual voltage > shown, REDUCE the constant
+				configuration.Vcal_k=DecimalDigitInput3(int(outV))/outV;
+				break; // from while() loop
+			}
+		}
+	}
+
+	//This was the last configuration step so recalculate some core values and write out to EEPROM
+
+	// parameters calculated from config variables go here
+	// adjust core sensor constants
+	V_o_bV=V_o_bV0+configuration.Vcal;
+	V_o_mV=V_o_mV0+configuration.mVcal;
+	V_o_C+=configuration.Ccal;
+	divider_k_bV*=configuration.Vcal_k; 
   
-  maxOutV=float(configuration.CV)/100*configuration.nCells;
+	// write out the configuration to EEPROM for next time
+	EEPROM_writeAnything(0, configuration);
+
+	//After config is done we'll go back to the wait for timeout screen just in case. 
+	state = STATE_WAIT_TIMEOUT;
+}
+
+void waitForTimeout()
+{
+	byte x;
+	printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_CFG);
+          
+	// check J1772
+	J1772_dur=pulseIn(pin_J1772, HIGH);
+	if(J1772_dur>50) { // noise control. also, deals with the case when no J1772 signal present at all
+		configuration.mainsC=0.06*J1772_dur+3; // J1772 spec - every 100uS = 6A input - this will work up to 48A
+		if(LCD_on) {
+			sprintf(str, "IN: %dV, %luA", int(mainsV), configuration.mainsC); myLCD->printStr(1, 7, 2, 0x1f, 0x3f, 0, str);
+		}
+	}
+          
+	x=BtnTimeout(10, 3);
+
+	if(x == 1) state = STATE_TOP_MENU; // some button was pressed
+	if(x == 0) // nothing pressed
+	{ 
+		state = STATE_CHARGE_START;
+	}
+}
+
+void doTopMenu()
+{
+	byte x;
+	printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_TOPMENU);
+	x=MenuSelector2(configMenuLen, configMenu);
+	switch(x)
+	{
+	case 0: state = STATE_CHARGE_START; break;
+	case 1: state = STATE_CONFIG_PWR; break;
+	case 2: state = STATE_CONFIG_TIMER; break;
+	default: break;
+	}
+}
+
+void configPower()
+{
+	printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_INC);      
+	configuration.mainsC = DecimalDigitInput3(configuration.mainsC); 
+	printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_OUTC);      
+	configuration.CC = DecimalDigitInput3(configuration.CC); 
+	state = STATE_TOP_MENU;
+}
+
+void configTimer()
+{
+	// now set the timer using the same button       
+	printConstStr(0, 0, 2, 0x1f, 0x3f, 0x1f, MSG_LCD_TOUT);
+	timeOut=DecimalDigitInput3(0); 
+	state = STATE_TOP_MENU;
+}
+
+//set up to start charging
+void chargeSetup() 
+{
+	maxOutV=float(configuration.CV)/100*configuration.nCells;
+	// cannot delay from here to charging function QC operation requires quick ramp after the command
+	// write out the configuration to EEPROM for next time
+	EEPROM_writeAnything(0, configuration);
+  
+	maxMainsC=configuration.mainsC; 
+	mainsV=read_mV(); // for power adjustments
+#ifdef drop110power       
+	if(J1772_dur<50) { // but only if no J signal
+		// curb power on 110VAC
+		if(mainsV<160) { 
+			maxMainsC=min(configuration.mainsC/2, 9.); // equivalent 15A from 110VAC // DEBUG
+		}
+	}
+#endif 
+
+	maxOutC=getAllowedC(configuration.CC); 
+            
+	//  set max hardware current protection to the fixed absMaxChargeCurrent value
+	setMaxC(peakMaxC*getAllowedC(absMaxChargerCurrent)); 
+            
+	timer_ch=millis(); // set the timer          
+	AH_charger=0; // reset AH counter
+           
+// zero motorcycles special now
+#ifdef DELTAQ
+	while(digitalRead(pin_DELTAQ)); // wait until the pin is pulled down by the BMS
+#endif
+
+	// reset the EOC pin (this pin is active LOW so reset means setting to HIGH) 
+	// high means charging is commencing. this will be pulled down by the charger when charge ends
+	// this also feeds a closed-loop BMS
+	digitalWrite(pin_EOC, HIGH); 
+              
+	//========================== MAIN RUN CHARGER FUNCTION=======================
+	// by this point, at least 15sec have passed since AC connection
+	//                and at least 10sec since battery connection
+	//                therefore, all caps should be pre-charged => close relays
+	//   (note: this requires precharge resistors across relays - MAX of 300R for inrelay
+	//          and MAX of 1k for outrelay. >3W power rating. Place small 1000V diode in
+	//          series with the outrelay resistor - anode to battery - to avoid precharge on
+	//          reverse polarity connection)     
+	digitalWrite(pin_inrelay, HIGH);
+	digitalWrite(pin_outrelay, HIGH);
+            
+	// check for invalid sensor configs
+	// most dangerous is disconnection of the current sensor
+	// generally will manifest itself by non-zero current reading while duty is zero 
+	// (which it should be at this point)
+	// 10A is a lot of margin for that
+	if(fabs(readC())>10) {
+		state = STATE_CHARGE_FINISH; //tear it down and stop everything
+	}
+
+	pids_Kp=pids_Kp_FAST; // start with fast PID - will be changed to slow when we see some current
+  
+	maxOutC1=maxOutC;
+  
+	CVreached=0; // status of CV state
+  
+	// reset V,C readings - otherwise averaging gets screwed up really badly
+	outC=0; 
+	outV=0; 
+	outC_ADC_0=0, outC_ADC=0, outV_ADC=0, outmV_ADC=0, T_ADC=0, T2_ADC=0;
+
+	if(LCD_on) {
+		myLCD->clrScreen();
+		sprintf(str, "CC=%dA, CV=%dV", int(maxOutC), int(maxOutV)); 
+		myLCD->printStr(0, 4, 2, 0x1f, 0x3f, 0x1f, str);      
+		delay(5000);
+		myLCD->clrScreen();
+	} else {
+		// machine-readable
+		// this assumes that only CC commands will be issued to the charger via serial
+		sprintf(str, "I:%d,%d,%d", int(configuration.AH*min_CV_Crating), int(maxOutC), int(maxOutV)); 
+		EMWserialMsg(str);
+	}
+
+	// reset timers - for AH metering and serial comms
+	timer=millis(); // this will be reset every cycle below after AH delta is calculated
+	timer_comm=timer;
+	
+	// turn on PWM output
+	PWM_enable_=1;
+}
+
+void chargeStop()
+{
+	PWM_enable_=0; // HAS to be here to ensure complete stop on any condition
+  
+	// make sure everything is off
+	digitalWrite(pin_inrelay, LOW);
+	digitalWrite(pin_outrelay, LOW);
+	digitalWrite(pin_fan, LOW);    
+	digitalWrite(pin_EOC, LOW); // active low
+	//==================== charger routine exited ===============================
+  
+	printClrMsg(MSG_DONE, 500, 0x1f, 0x3f, 0); 
+	sprintf(str, "%dAH", int(AH_charger)); 
+	if(LCD_on) {
+		myLCD->printStr(0, 6, 2, 0x1f, 0x3f, 0x1f, str);      
+		charger_run=1; // charger has run this mains cycle...
+		state = STATE_SHUTDOWN; //STATE_TOP_MENU;   
+	} else {
+		EMWserialMsg(str);
+		state = STATE_SERIALCONTROL; // ready for next run   
+	}
+}
+
+/* //this used to run the charger given the below conditions but things are being restructured so it has to sit out here for now
 
   // run charger if: 
   //         (1) charger has NOT been run yet in this cycle, or 
   //         (2) has been run over a week ago
   //         (3) green button is pressed to override
   if(LCD_on==0 || digitalRead(pin_pwrCtrl2Button)==HIGH || charger_run==0) {
-      if(!LCD_on) {
-        // drop us directly into a serial control loop
-        state=STATE_SERIALCONTROL;
-      } else {
-        state = STATE_WAIT_TIMEOUT;
-      }
-      if(configuration.CC<=0) state=STATE_CONFIG_PWR;
-      
-      while(state != STATE_SHUTDOWN)
-      {
-        // reload voltages
-        mainsV=read_mV();
-        outV=readV();
+*/
+
+void loop() {  
+	byte x=255; // default, has to be different from 0 or 1
+	
+	// reload voltages
+	mainsV=read_mV();
+	outV=readV();
         
-        if(LCD_on) {
-          myLCD->clrScreen();
-          printConstStr(0, 6, 2, 0x1f, 0x3f, 0, MSG_LCD_PARAMS);
-          sprintf(str, "IN: %dV, %luA", int(mainsV), configuration.mainsC); 
-		  myLCD->printStr(1, 7, 2, 0x1f, 0x3f, 0, str);
-          sprintf(str, "OUT: %dV, %luA", int(outV), configuration.CC); 
-		  myLCD->printStr(1, 8, 2, 0x1f, 0x3f, 0, str);
-          sprintf(str, "T-OUT: %li min", timeOut); 
-		  myLCD->printStr(1, 9, 2, 0x1f, 0x3f, 0, str); 
-        }
         
-        //======================== MAIN STATE MACHINE ======================
-        switch(state)
-        {
-       
-        case STATE_WAIT_TIMEOUT:
-          printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_CFG);
-          
-          // check J1772
-          J1772_dur=pulseIn(pin_J1772, HIGH);
-          if(J1772_dur>50) { // noise control. also, deals with the case when no J1772 signal present at all
-            configuration.mainsC=0.06*J1772_dur+3; // J1772 spec - every 100uS = 6A input - this will work up to 48A
-            if(LCD_on) {
-              sprintf(str, "IN: %dV, %luA", int(mainsV), configuration.mainsC); myLCD->printStr(1, 7, 2, 0x1f, 0x3f, 0, str);
-            }
-          }
-          
-          x=BtnTimeout(10, 3);
-
-          if(x == 1) state = STATE_TOP_MENU; // some button was pressed
-          if(x == 0) // nothing pressed
-           { 
-            state = STATE_CHARGE;
-           }
-          break;
-       
-        case STATE_TOP_MENU:
-          printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_TOPMENU);
-          x=MenuSelector2(configMenuLen, configMenu);
-          switch(x)
-          {
-            case 0: state = STATE_CHARGE; break;
-            case 1: state = STATE_CONFIG_PWR; break;
-            case 2: state = STATE_CONFIG_TIMER; break;
-            default: break;
-          }
-          break;
-
-        case STATE_CONFIG_PWR:
-          printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_INC);      
-          configuration.mainsC = DecimalDigitInput3(configuration.mainsC); 
-          printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_OUTC);      
-          configuration.CC = DecimalDigitInput3(configuration.CC); 
-          state = STATE_TOP_MENU;
-          break;
-
-        case STATE_CONFIG_TIMER:
-            // now set the timer using the same button       
-            printConstStr(0, 0, 2, 0x1f, 0x3f, 0x1f, MSG_LCD_TOUT);
-            timeOut=DecimalDigitInput3(0); 
-           state = STATE_TOP_MENU;
-           break;
-
-        case STATE_SERIALCONTROL:
-			if (getSerialCmd()) {
-				state=STATE_CHARGE;
-			} else {
-				delay(200); // wait a bit and do another check for a command - cannot wait too long due to QC timing. 
-			}
-			break;
+	//======================== MAIN STATE MACHINE ======================
+	switch(state)
+	{
+	case STATE_SETUP_CV:
+		setupCV();
+		break;
+	case STATE_SETUP_CELLS:
+		setupCells();
+		break;
+	case STATE_SETUP_CAPACITY:
+		setupCapacity();
+		break;
+	case STATE_SETUP_CALIBRATE:
+		setupCalibration();
+		break;
+	case STATE_WAIT_TIMEOUT:
+		waitForTimeout();
+		break;
+	case STATE_TOP_MENU:
+		doTopMenu();
+		break;
+	case STATE_CONFIG_PWR:
+		configPower();
+		break;
+	case STATE_CONFIG_TIMER:
+		configTimer();
+		break;
+	case STATE_SERIALCONTROL:
+		if (getSerialCmd()) {
+			state=STATE_CHARGE_START;
+		} else {
+			delay(200); // wait a bit and do another check for a command - cannot wait too long due to QC timing. 
+		}
+		break;
     
-         case STATE_CHARGE: 
-           // cannot delay from here to charging function QC operation requires quick ramp after the command
-           // write out the configuration to EEPROM for next time
-           EEPROM_writeAnything(0, configuration);
-  
-           maxMainsC=configuration.mainsC; 
-           mainsV=read_mV(); // for power adjustments
-#ifdef drop110power       
-           if(J1772_dur<50) { // but only if no J signal
-             // curb power on 110VAC
-             if(mainsV<160) { 
-               maxMainsC=min(configuration.mainsC/2, 9.); // equivalent 15A from 110VAC // DEBUG
-             }
-           }
-#endif 
-
-            maxOutC=getAllowedC(configuration.CC); 
-            
-            //  set max hardware current protection to the fixed absMaxChargeCurrent value
-            setMaxC(peakMaxC*getAllowedC(absMaxChargerCurrent)); 
-            
-            timer_ch=millis(); // set the timer          
-            AH_charger=0; // reset AH counter
-           
-// zero motorcycles special now
-#ifdef DELTAQ
-            while(digitalRead(pin_DELTAQ)); // wait until the pin is pulled down by the BMS
-#endif
-
-            // reset the EOC pin (this pin is active LOW so reset means setting to HIGH) 
-            // high means charging is commencing. this will be pulled down by the charger when charge ends
-            // this also feeds a closed-loop BMS
-            digitalWrite(pin_EOC, HIGH); 
-              
-            //========================== MAIN RUN CHARGER FUNCTION=======================
-            // by this point, at least 15sec have passed since AC connection
-            //                and at least 10sec since battery connection
-            //                therefore, all caps should be pre-charged => close relays
-            //   (note: this requires precharge resistors across relays - MAX of 300R for inrelay
-            //          and MAX of 1k for outrelay. >3W power rating. Place small 1000V diode in
-            //          series with the outrelay resistor - anode to battery - to avoid precharge on
-            //          reverse polarity connection)     
-            digitalWrite(pin_inrelay, HIGH);
-            digitalWrite(pin_outrelay, HIGH);
-            
-            // check for invalid sensor configs
-            // most dangerous is disconnection of the current sensor
-            // generally will manifest itself by non-zero current reading while duty is zero 
-            // (which it should be at this point)
-            // 10A is a lot of margin for that
-            if(fabs(readC())>10) {
-              return;
-            }
-  
-            // CC-CV profile, end condition - voltage goes to CV and current goes to X% of CC
-            runChargeStep();
-            PWM_enable_=0; // HAS to be here to ensure complete stop on any condition
-  
-            // make sure everything is off
-            digitalWrite(pin_inrelay, LOW);
-            digitalWrite(pin_outrelay, LOW);
-            digitalWrite(pin_fan, LOW);    
-            digitalWrite(pin_EOC, LOW); // active low
-            //==================== charger routine exited ===============================
-  
-            printClrMsg(MSG_DONE, 500, 0x1f, 0x3f, 0); 
-            sprintf(str, "%dAH", int(AH_charger)); 
-            if(LCD_on) {
-              myLCD->printStr(0, 6, 2, 0x1f, 0x3f, 0x1f, str);      
-              charger_run=1; // charger has run this mains cycle...
-              state = STATE_SHUTDOWN; //STATE_TOP_MENU;   
-            } else {
-              EMWserialMsg(str);
-              state = STATE_SERIALCONTROL; // ready for next run   
-            }
-  
-            break; 
-
-          default: break;
-        }
-        //=========================== END MAIN STATE MACHINE
-      }
-    }
-  
+	case STATE_CHARGE_START:
+		chargeSetup();
+		break;
+	case STATE_CHARGE_LOOP:
+		runChargeStep();
+		break;
+	case STATE_CHARGE_FINISH:
+		chargeStop();            
+	case  STATE_SHUTDOWN:
+		state = STATE_TOP_MENU; //should be safe to do. No charging will happen in this state unless someone picks RUN again.+
+		break;
+	default: break;
+	}
 }
 
 
-//-------------------------------- main charger routine ------------------------------------------------
+//============================================== MAIN CHARGER LOOP =============================================
 int runChargeStep() {
-  pids_Kp=pids_Kp_FAST; // start with fast PID - will be changed to slow when we see some current
   
-  maxOutC1=maxOutC;
-  
-  CVreached=0; // status of CV state
-  
-  // reset V,C readings - otherwise averaging gets screwed up really badly
-  outC=0; 
-  outV=0; 
-  outC_ADC_0=0, outC_ADC=0, outV_ADC=0, outmV_ADC=0, T_ADC=0, T2_ADC=0;
-
-  if(LCD_on) {
-    myLCD->clrScreen();
-    sprintf(str, "CC=%dA, CV=%dV", int(maxOutC), int(maxOutV)); 
-    myLCD->printStr(0, 4, 2, 0x1f, 0x3f, 0x1f, str);      
-    delay(5000);
-    myLCD->clrScreen();
-  } else {
-    // machine-readable
-    // this assumes that only CC commands will be issued to the charger via serial
-    sprintf(str, "I:%d,%d,%d", int(configuration.AH*min_CV_Crating), int(maxOutC), int(maxOutV)); 
-    EMWserialMsg(str);
-  }
-
-  // reset timers - for AH metering and serial comms
-  timer=millis(); // this will be reset every cycle below after AH delta is calculated
-  timer_comm=timer;
-  
-  // turn on PWM output
-  PWM_enable_=1;
-  
-  //============================================== MAIN CHARGER LOOP =============================================
-  
-  while(1) {
-    // NOTE THAT outC / outV readings are all set in the interrupts
-
-    // track targetC to maxOutC1
-    targetC_ADC=1024*(k_V_C*maxOutC1
+	// NOTE THAT outC / outV readings are all set in the interrupts
+	// track targetC to maxOutC1
+	targetC_ADC=1024*(k_V_C*maxOutC1
 #ifdef NEG_CSENSE
           *-1
 #endif
           +V_o_C)/Aref;
 
-    if(!LCD_on) {
+	if(!LCD_on) {
 		pollSerial(); //reads in serial data if there is some waiting
     }
-    
+
+	//First things first, we check for error conditions, button presses, and other reasons to abort
+
+	// timer
+	sec_up=(unsigned int)1.*(millis()-timer_ch)/1000;
+
+	// check for break conditions 
+	// mask the first few seconds
+	if(sec_up>CV_timeout && CVreached && maxOutC1 < configuration.AH*min_CV_Crating) {
+		breakCycle=1;
+	} else {
+		breakCycle=0; // reset 
+	}
+	// do we REALLY need to break?
+	if(breakCycle) {
+		breakCnt++;
+		if(breakCnt>stopCycles) {
+			printClrMsg(MSG_NORMEXIT, 5000, 0, 0x3f, 0);
+			return 0; 
+		}
+	} else {
+		breakCnt=0;
+	}    
+
+	// check HVC signal from BMS
+	if(digitalRead(pin_BMS)==LOW
+#ifdef DELTAQ
+           || digitalRead(pin_DELTAQ)
+#endif
+	) { // active LOW (so you need to pull up by connecting miniBMS loop to EOC signal)
+		// BMS commanding charger to stop
+		// noise protection - ensure signal stays on for 100ms or so
+		delay(100);
+		if(digitalRead(pin_BMS)==LOW
+#ifdef DELTAQ
+			|| digitalRead(pin_DELTAQ)
+#endif        
+		) {
+			// this is for real
+			printClrMsg(MSG_BMSSTOP, 5000, 0x1f, 0x3f, 0);
+			state = STATE_CHARGE_FINISH;
+			return 0; 
+		}
+	} 
+            
+	// check the timer
+	if(timeOut>0 && (millis()-timer_ch)/60000>timeOut) {
+		// timer run out
+		printClrMsg(MSG_TIMEOUT, 5000, 0x1f, 0x3f, 0);
+		state = STATE_CHARGE_FINISH;
+		return 0; 
+	}
+
+	if(outV < -10 || outC < -10) {
+		// sensor polarity problems. abort
+		printClrMsg(MSG_SENSEERROR, 300, 0, 0x3f, 0);
+		state = STATE_CHARGE_FINISH;
+		return 1; // full stop
+	}
+      
+	// check if need to stop - RED button pressed? - both in LCD and non-LCD modes
+	if(digitalRead(pin_pwrCtrlButton)==HIGH) 
+	{
+		state = STATE_CHARGE_FINISH;
+		return 0;
+	}
+      
+#ifdef CHECKMAINS         
+	// check mains
+	if(read_mV()<minMains) {
+		delay(2000);
+		printClrMsg(MSG_LOSTIN, 5000, 0x1f, 0x3f, 0);
+		state = STATE_CHARGE_FINISH;
+		return 1; // error
+	}
+#endif
+
+	//Now that we're sure we still want to charge let's see if we should output any status messages, configure charging, etc.
+
     // process serial commands and print out status only every 50ms or so
     // in LCD mode, this just increments the cycle counter for proper timing of the LCD printout
     if(millis()-timer_comm > stepDelay) { 
-      n++; 
-      timer_comm=millis();
+		n++; 
+		timer_comm=millis();
       
-      normT=getNormT();
+		normT=getNormT();
   
   #ifdef DEBUG2
-      Serial.print("free RAM: "); Serial.println(freeRam());
-      Serial.print("       -outC_ADC="); Serial.println(outC_ADC);
-      Serial.print("            -outC="); Serial.println(int(outC));
-      Serial.print("            -maxOutC="); Serial.println(maxOutC);
-      Serial.print("            -targetC="); Serial.println(targetC_ADC);
-      Serial.print("       -outV_ADC="); Serial.println(outV_ADC);
-      Serial.print("       -outmV_ADC="); Serial.println(outmV_ADC);
-      Serial.print("       -T_ADC="); Serial.println(T_ADC);
-      Serial.print("            -normT="); Serial.println(normT);
-      Serial.print("       -duty="); Serial.println(milliduty/10000);
+		Serial.print("free RAM: "); Serial.println(freeRam());
+		Serial.print("       -outC_ADC="); Serial.println(outC_ADC);
+		Serial.print("            -outC="); Serial.println(int(outC));
+		Serial.print("            -maxOutC="); Serial.println(maxOutC);
+		Serial.print("            -targetC="); Serial.println(targetC_ADC);
+		Serial.print("       -outV_ADC="); Serial.println(outV_ADC);
+		Serial.print("       -outmV_ADC="); Serial.println(outmV_ADC);
+		Serial.print("       -T_ADC="); Serial.println(T_ADC);
+		Serial.print("            -normT="); Serial.println(normT);
+		Serial.print("       -duty="); Serial.println(milliduty/10000);
   //    Serial.print(""); Serial.println();
   #endif
     
-      // if in Serial mode, check for commands here
-      if(!LCD_on) {
-		if (!processSerial()) return 0;
-	  } else {        
-        // slow voltage control cycle here. AT Cstep=0.5A default, we are ramping down at ~5A/second
-        // this may not be enough to avoid a bit of overvoltage beyond CV
-        // need to do it ONLY for non-serial control as in serial control the charger is a slave
-        if(outV > maxOutV) {
-          CVreached=1;
-          maxOutC-=Cstep;
-          if(maxOutC<0) maxOutC=0;
-        }    
-        // recalc maxOutC1 - this will account for temp derating
-        maxOutC1=getAllowedC(maxOutC);
-        delay(30); // a delay equivalent to non-LCD execution time
-      }
+		// if in Serial mode, check for commands here
+		if(!LCD_on) {
+			if (!processSerial()) 
+			{
+				state = STATE_CHARGE_FINISH;
+				return 0;
+			}
+		} else {        
+			// slow voltage control cycle here. AT Cstep=0.5A default, we are ramping down at ~5A/second
+			// this may not be enough to avoid a bit of overvoltage beyond CV
+			// need to do it ONLY for non-serial control as in serial control the charger is a slave
+			if(outV > maxOutV) {
+				CVreached=1;
+				maxOutC-=Cstep;
+				if(maxOutC<0) maxOutC=0;
+			}    
+			// recalc maxOutC1 - this will account for temp derating
+			maxOutC1=getAllowedC(maxOutC);
+			delay(30); // a delay equivalent to non-LCD execution time
+		}
     }
     
     //------------------------------------------------ print out stats ----------------------------------------
     // but only every few hundred cycles. defaults: measCycle_len=20, stepDelay=30
-    if(n>measCycle_len) {
-      n=0;
-
-      // timer
-      sec_up=(unsigned int)1.*(millis()-timer_ch)/1000;
-
-      // check for break conditions 
-      // mask the first few seconds
-      if(sec_up>CV_timeout && CVreached && maxOutC1 < configuration.AH*min_CV_Crating) {
-        breakCycle=1;
-      } else {
-        breakCycle=0; // reset 
-      }
-      // do we REALLY need to break?
-      if(breakCycle) {
-        breakCnt++;
-        if(breakCnt>stopCycles) {
-          printClrMsg(MSG_NORMEXIT, 5000, 0, 0x3f, 0);
-          return 0; 
-        }
-      } else {
-        breakCnt=0;
-      }    
+	if(n>measCycle_len) {
+		n=0;
       
-      // AH meter
-      AH_charger+=outC*int(millis()-timer)/1000/3600;
-      timer=millis();
-      
-      // check HVC signal from BMS
-      if(digitalRead(pin_BMS)==LOW
-#ifdef DELTAQ
-            || digitalRead(pin_DELTAQ)
-#endif
-      ) { // active LOW (so you need to pull up by connecting miniBMS loop to EOC signal)
-        // BMS commanding charger to stop
-        // noise protection - ensure signal stays on for 100ms or so
-        delay(100);
-        if(digitalRead(pin_BMS)==LOW
-#ifdef DELTAQ
-            || digitalRead(pin_DELTAQ)
-#endif        
-        ) {
-          // this is for real
-          printClrMsg(MSG_BMSSTOP, 5000, 0x1f, 0x3f, 0);
-          return 0; 
-        }
-      } 
+		// AH meter
+		AH_charger+=outC*int(millis()-timer)/1000/3600;
+		timer=millis();
             
-      // check the timer
-      if(timeOut>0 && (millis()-timer_ch)/60000>timeOut) {
-        // timer run out
-        printClrMsg(MSG_TIMEOUT, 5000, 0x1f, 0x3f, 0);
-        return 0; 
-      }
-      
-      //==================== print all parameters
-      // print here only if LCD is on - otherwise print in faster loop over Serial
-      if(LCD_on) {
-        printParams(outV, outC, normT, AH_charger, maxOutC1, maxOutV);
-      }
-      
-      if(outV < -10 || outC < -10) {
-        // sensor polarity problems. abort
-        printClrMsg(MSG_SENSEERROR, 300, 0, 0x3f, 0);
-        return 1; // full stop
-      }
-      
-      // check if need to stop - RED button pressed? - both in LCD and non-LCD modes
-      if(digitalRead(pin_pwrCtrlButton)==HIGH) return 0; 
-      
-#ifdef CHECKMAINS         
-      // check mains
-      if(read_mV()<minMains) {
-        delay(2000);
-        printClrMsg(MSG_LOSTIN, 5000, 0x1f, 0x3f, 0);
-        return 1; // error
-      }
-#endif
-      
-    }  // end measCycle loop    
-    
-  }; //======================================== END MAIN CHARGER LOOP ===================================
-
-  return 0;
+		//==================== print all parameters
+		// print here only if LCD is on - otherwise print in faster loop over Serial
+		if(LCD_on) {
+			printParams(outV, outC, normT, AH_charger, maxOutC1, maxOutV);
+		}      
+	}
+	return 0;
 } // end runChargeStep()
 
 int freeRam () {
