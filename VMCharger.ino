@@ -560,6 +560,8 @@ void waitForTimeout()
 {
 	byte x;
 
+	myLCD->clrScreen();
+
 	printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_CFG);
           
 	// check J1772
@@ -583,6 +585,7 @@ void waitForTimeout()
 void doTopMenu()
 {
 	byte x;
+	myLCD->clrScreen();
 	printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_TOPMENU);
 	x=MenuSelector2(configMenuLen, configMenu);
 	switch(x)
@@ -698,6 +701,8 @@ void chargeSetup()
 	
 	// turn on PWM output
 	PWM_enable_=1;
+
+	state = STATE_CHARGE_LOOP; //enable the charge loop so we can monitor the charging status
 }
 
 void chargeStop()
