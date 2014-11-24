@@ -403,7 +403,7 @@ void setup() {
 	divider_k_bV=upperR0_bV/lowerR_bV;
 	//=============================== END finalize init of the sensors =============================
   
-	state = STATE_WAIT_TIMEOUT;
+	state = STATE_STARTUP_CFG;
 	
 	loadConfig();
 
@@ -545,9 +545,21 @@ void setupCalibration()
 	state = STATE_WAIT_TIMEOUT;
 }
 
+void startupConfig()
+{
+	printClrMsg(MSG_THX, 50, 0, 0x3f, 0);
+	forceConfig=BtnTimeout(5, 7); // this will return 0 if no button pressed; 1 otherwise; 5 seconds, line #7
+	if (forceConfig != 0)
+	{
+		state = STATE_SETUP_CV;
+	}
+	else state = STATE_WAIT_TIMEOUT;
+}
+
 void waitForTimeout()
 {
 	byte x;
+
 	printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_CFG);
           
 	// check J1772
@@ -748,6 +760,9 @@ void loop() {
 		break;
 	case STATE_TOP_MENU:
 		doTopMenu();
+		break;
+	case STATE_STARTUP_CFG:
+		startupConfig();
 		break;
 	case STATE_CONFIG_PWR:
 		configPower();

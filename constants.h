@@ -216,6 +216,7 @@ const uint8_t configMenuLen = 3;
 const uint8_t STATE_TOP_MENU = 0x00;
 const uint8_t STATE_CONFIG_PWR = 0x01;
 const uint8_t STATE_CONFIG_TIMER = 0x02;
+const uint8_t STATE_STARTUP_CFG = 0x03;
 const uint8_t STATE_CHARGE_START = 0x04; //charging getting set up
 const uint8_t STATE_CHARGE_LOOP = 0x05; //charging is ongoing
 const uint8_t STATE_CHARGE_FINISH = 0x06; //quit charging and set everything inert again
