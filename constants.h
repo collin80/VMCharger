@@ -12,30 +12,8 @@
 #include <avr/pgmspace.h>
 #include <Arduino.h>
 
-// sensor constants - moved them to here as they are changed very often depending on what unit we have
-// 1M in low-voltage units (up to 150V)
-// 2M in SmartCharge-12000 standard units
-// 2.4M in most PFCdirect units
-// 3M in newer PFCdirect units
-// 5-6M in high voltage units (but usually only on high-side)
-const float upperR0_mV = 3000.;
-const float upperR0_bV = 3000.;
-
 //Don't change this hard coded value!
 const uint32_t MAXDMILLIDUTY = 9700000; // to run precise PID loop   
-
-
-// from Oct 10 2013, this defaults to 20kHz due to use of faster IGBTs. For kits with older IGBTs, use 60-70
-// for 60hz line frequency, period has to ideally be 260 / N, where N is an integer
-// for 50hz line frequency, 312 / N
-#ifdef LOWVOLTAGE
-const int period = 130; // 8khz for low-voltage, high-current applications; 60hz line freq
-#else 
-//   const int period=52; // 52us (~20khz) for normal-voltage applications; 60hz line freq
-//  const int period=65; // 65us (~16khz) for high-voltage applications; 60hz line freq
-//  const int period=86; // 86us (~12kHz) for high-voltage applications with high inductance or low inductor voltage 
-const int period = 130; // 130us (~8kHz) for medium-voltage applications with high inductance or low inductor voltage 
-#endif
 
 const int PWMFreq = 1000000 / period;
 
