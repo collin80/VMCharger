@@ -541,8 +541,8 @@ void setupCalibration()
 	// write out the configuration to EEPROM for next time
 	EEPROM_writeAnything(0, configuration);
 
-	//After config is done we'll go back to the wait for timeout screen just in case. 
-	state = STATE_WAIT_TIMEOUT;
+	//After config is done we'll go to the menu which is a safe thing to do.
+	state = STATE_TOP_MENU;
 }
 
 void startupConfig()
@@ -593,8 +593,27 @@ void doTopMenu()
 	case 0: state = STATE_CHARGE_START; break;
 	case 1: state = STATE_CONFIG_PWR; break;
 	case 2: state = STATE_CONFIG_TIMER; break;
+	case 3: state = STATE_FACTORY_RESET; break;
 	default: break;
 	}
+}
+
+void factoryReset()
+{
+	PWM_enable_ = 0; //make sure we're not set to be doing any charging.
+	//zero out all configuration
+	configuration.AH = 0;
+	configuration.CC = 0;
+	configuration.Ccal = 0.0f;
+	configuration.CV = 0;
+	configuration.mainsC = 0;
+	configuration.mVcal = 0.0f;
+	configuration.nCells = 0;
+	configuration.Vcal = 0.0f;
+	configuration.Vcal_k = 0.0f;
+	//then save the configuration
+	EEPROM_writeAnything(0, configuration);
+	loadConfig(); //pretend we rebooted and go back through set up
 }
 
 void configPower()
@@ -782,7 +801,6 @@ void loop() {
 			delay(200); // wait a bit and do another check for a command - cannot wait too long due to QC timing. 
 		}
 		break;
-    
 	case STATE_CHARGE_START:
 		chargeSetup();
 		break;
@@ -790,9 +808,13 @@ void loop() {
 		runChargeStep();
 		break;
 	case STATE_CHARGE_FINISH:
-		chargeStop();            
+		chargeStop();     
+		break;
+	case STATE_FACTORY_RESET:
+		factoryReset();
+		break;
 	case  STATE_SHUTDOWN:
-		state = STATE_TOP_MENU; //should be safe to do. No charging will happen in this state unless someone picks RUN again.+
+		state = STATE_TOP_MENU; //should be safe to do. No charging will happen in this state unless someone picks RUN again.
 		break;
 	default: break;
 	}

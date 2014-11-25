@@ -210,8 +210,6 @@ const int32_t pids_Kp_FAST = 300; // fast PID to start with
 const int32_t pids_Ki = 1; // need small integral term - otherwise we get some constant offset error
 const int32_t pids_Kd = 0; // for now, just PI loop
 
-const uint8_t configMenuLen = 3;
-
 //these are the general system loop states
 const uint8_t STATE_TOP_MENU = 0x00;
 const uint8_t STATE_CONFIG_PWR = 0x01;
@@ -226,6 +224,7 @@ const uint8_t STATE_SETUP_CV = 0x20; //per cell voltage
 const uint8_t STATE_SETUP_CELLS = 0x21; //# of cells in pack
 const uint8_t STATE_SETUP_CAPACITY = 0x22; //capacity of pack
 const uint8_t STATE_SETUP_CALIBRATE = 0x23; // sensitivity calibration only. zero point calibration done automatically on power-on
+const uint8_t STATE_FACTORY_RESET = 0xDB; //clear all configuration and restart setup process.
 const uint8_t STATE_SHUTDOWN = 0xff;
 
 const uint8_t MSG_THX = 0x00;
@@ -260,7 +259,8 @@ const uint8_t MSG_LCD_BLANK = 0x0F;
 
 	//============================================== define messages ==================
 	//-----------------------Navigate Menus--------------------
-static const char * configMenu[] = { "Run ", "Pwr ", "Time" };
+const uint8_t configMenuLen = 4;
+static const char * configMenu[] = { "Run  ", "Pwr  ", "Time ", "RESET"};
 
 #ifndef LCD_SPE
   const char msg_long_0[] PROGMEM = "Thank you for choosing EMotorWerks! BTN to CFG";
