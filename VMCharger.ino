@@ -46,7 +46,7 @@ float divider_k_bV = -1.;
 float V_o_bV = V_o_bV0; // need to reassign to non-const as it will be adjusted below
 float divider_k_mV = -1.;
 byte CVreached=0;
-int POWER_DIRECTION = 1; //has to be int as it is signed
+int POWER_DIRECTION = 1; //has to be int as it is signed - 1 is the normal direction where the charger is sending power to the batteries
 
 // V/A constant for the charger output current sensor 
 float V_o_C =
@@ -458,10 +458,14 @@ void setupCalibration()
 	// prep for output voltage zero calibration
 	// this will generally NOT work on PFCdirect units as there is always voltage on the output
 	// to calibrate at the factory / right after build, power 12V ONLY and follow through calibration
-	outV=readV();
-	sprintf(str, "Drain %dV, BTN", int(outV));  
-	printMsg(str, 0, 0, 0, 0x1f, 0x3f, 0x00);
-	while(!(digitalRead(pin_pwrCtrlButton) || digitalRead(pin_pwrCtrl2Button)));
+	//Loops now to give feedback on what the read voltage is. This allows one to see that it has actually drained.
+	while(!(digitalRead(pin_pwrCtrlButton) || digitalRead(pin_pwrCtrl2Button))) 
+	{
+		outV=readV();
+		sprintf(str, "Drain %dV, BTN   ", int(outV));  
+		printMsg(str, 0, 0, 0, 0x1f, 0x3f, 0x00);
+		delay(500);
+	}
 	outV=readV(); // re-read after discharge
 
 	// now actual zero cal

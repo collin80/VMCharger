@@ -26,8 +26,8 @@
 
 //#define DCDC // module is used in DC-DC mode (buck or boost)
 
-//Calculations rely on this being defined even for non DC/DC Units. Leave it at 1 if unsure.
-const int DCDC_BUCK = 1; //1 = Input higher than output (single-stage buck units or SmartCharge units), -1=single-stage boost units; this has to be an int type as it's a signed value
+//Calculations rely on this being defined even for non DC/DC Units. Set it to 0 if you don't use a DC/DC unit
+const int DCDC_BUCK = 0; //1 = Input higher than output (single-stage buck units or SmartCharge units), -1=single-stage boost units; this has to be an int type as it's a signed value
 
 // this was set in a few QC units prior to Sep 28, 2014. 
 //#define NEG_CSENSE 
