@@ -7,38 +7,19 @@ This is the firmware for EMotorWerks Intelligent DC Charging Systems - covering 
 
 Controller: Arduino Pro Mini 5V (based on a ATmega328P microcontroller)
 
-============================== main operation blocks
------- Startup: 
-* check for LCD presence. if none (or the programming button in the programming state), 
-  launch in the serial-controlled mode 
-* 2 timeouts - one 5 sec for config, one 10 sec for power setting. can be interrupled by any button
-* check mains voltage. If 120, limit power to ~1.5kW
------- Charging (CV or CC):
-* modulate duty cycle per PID loop calculations running at 250Hz (double the line frequency)
-* break when exit condition satisfied or stop / pause commands received
-
-============================== SERIAL COMMAND SYNTAX =================
-M,ccc,vvv,sss,E - start charger from 'READY' state with ccc CC point and vvv CV point
-                  charger will echo settings. make sure they are what you sent,
-                  sss is a checksum = (ccc + vvv) % 1000 
-M,001,000,001,E - stop charge
-============================== SERIAL STATUS REPORTING ===============
-every 100ms or so, the charger will report its status. 
-Generally a dump of the critical charging parameters in the following format:
-'M,D0,C965,V334,T-68,O1,R0,E' - [D]uty 0%, output [C]urrent 96.5A, output 
-[V]oltage 334V, heatsink [T]emp -68C, [O]utput charge 0.1AH, [R]untime 0 minutes
+See QuickStart doc for details on charger operations etc: 
+https://docs.google.com/a/emotorwerks.com/document/d/14axudenSziPm8gjc8Sv2n5Np-XDPIssUk-YkXAVsxSw/edit
 
 ********** HARDWARE MODS REQUIRED to run this firmware on pre-V14 hardware!!! ************
 * change RC filter on maxC line (pin 10 Arduino) - ensure C is no more than 1uF
 * ensure filter capacitance is less or equal to 0.1uF on all current and voltage senging
 *********************************************************************************
 
-This software is released as open source and is free for any personal use.
-Commercial use prohibited without written approval from the Author and / or Emotorwerks
-Absolutely no warranty is provided and no guarantee for fit for a specific purpose
+This software is released as open source and is free for personal use ONLY.
+Commercial use PROHIBITED without written approval from the Author and / or Electric Motor Werks, Inc.
+Absolutely NO WARRANTY is provided and no guarantee for fit for a specific purpose
 
-Original version created Jan 2011 by Valery Miftakhov, Electric Motor Werks, LLC & Inc. 
-All rights reserved. Copyright 2014
+Original version created Jan 2011 by Valery Miftakhov, Electric Motor Werks, LLC & Inc. All rights reserved. Copyright 2011-...
 */
 
 #include <avr/interrupt.h> 
@@ -65,6 +46,7 @@ float divider_k_bV = -1.;
 float V_o_bV = V_o_bV0; // need to reassign to non-const as it will be adjusted below
 float divider_k_mV = -1.;
 byte CVreached=0;
+int POWER_DIRECTION = 1; //has to be int as it is signed
 
 // V/A constant for the charger output current sensor 
 float V_o_C =
@@ -278,7 +260,8 @@ void sampleInterrupt() {
           pids_err = targetC_ADC - outC_ADC; 
   #ifdef NEG_CSENSE
           pids_err *= -1; // the current signal (and hence the error sign) runs in a different direction
-  #endif        
+  #endif
+		  pids_err *= POWER_DIRECTION; //bidirectional
           
           deltaDuty = pids_Kp * pids_err;
       
@@ -338,12 +321,13 @@ void hardwareInit()
   pinMode(pin_DELTAQ, INPUT);
 
   // set output digital pins
+  pinMode(pin_dirCtrl, OUTPUT);
+  pinMode(pin_inrelay, OUTPUT);
   pinMode(pin_outrelay, OUTPUT);
   pinMode(pin_PWM, OUTPUT);
   pinMode(pin_maxC, OUTPUT);
   pinMode(pin_EOC, OUTPUT);
   pinMode(pin_fan, OUTPUT);
-  pinMode(pin_inrelay, OUTPUT);
   
   // setup ADC
   ADMUX = B01000000;  // default to AVCC VRef, ADC Right Adjust, and ADC channel 0 (current)
@@ -464,12 +448,12 @@ void setupCapacity()
 void setupCalibration()
 {
 	outC_ADC_0=outC_ADC; // ADC reference
-	outC=readC();  
+	outC=readC();
+	configuration.Ccal = POWER_DIRECTION
 #ifdef NEG_CSENSE
-	configuration.Ccal=-outC*k_V_C;
-#else
-	configuration.Ccal=outC*k_V_C;
+	* -1
 #endif
+	* outC * k_V_C;
 
 	// prep for output voltage zero calibration
 	// this will generally NOT work on PFCdirect units as there is always voltage on the output
@@ -515,9 +499,10 @@ void setupCalibration()
 				// battery has been connected, now need to wait until voltage stabilizes
 				// in units with 390R precharge, time constant is up to 4 seconds
 				// we need to wait for 4 constants (15 seconds), then close relay, measure, and open relay again
-				delay(15000); // let settle
-				digitalWrite(pin_outrelay, HIGH);
-				delay(500);
+				dotsDelay(1000, 15, 5); // delay for 15s, printing one dot every second
+				// delay(15000); // let settle
+				digitalWrite(pin_outrelay, HIGH); // now safe to close the relay
+				delay(500); // let settle
 				outV=readV(); // read settled voltage
 				digitalWrite(pin_outrelay, LOW);
 				// calibrate
@@ -825,12 +810,7 @@ void loop() {
 int runChargeStep() {
   
 	// NOTE THAT outC / outV readings are all set in the interrupts
-	// track targetC to maxOutC1
-	targetC_ADC=1024*(k_V_C*maxOutC1
-#ifdef NEG_CSENSE
-          *-1
-#endif
-          +V_o_C)/Aref;
+	setTargetC();
 
 	if(!LCD_on) {
 		pollSerial(); //reads in serial data if there is some waiting
@@ -989,4 +969,24 @@ void setMaxC(float maxC) {
 #else
   Timer1.setPwmDuty(pin_maxC, 1024./Aref*(V_o_C+k_V_C*maxC));
 #endif
+}
+
+//------------ set target current for the PID loop
+void setTargetC() {
+  // track targetC to maxOutC1
+  if(POWER_DIRECTION==1) {
+    targetC_ADC=1024*(k_V_C*maxOutC1
+#ifdef NEG_CSENSE
+          *-1
+#endif
+          +V_o_C)/Aref;
+  } else {
+    // scale according to input / output voltage settings
+    // since POWER_DIRECTION=-1 means we are boosting, outV is always going to be higher than input
+    targetC_ADC=1024*(k_V_C*maxOutC1*(-1)*outV/mainsV
+#ifdef NEG_CSENSE
+          *-1
+#endif
+          +V_o_C)/Aref;
+  }    
 }

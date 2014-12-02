@@ -28,5 +28,6 @@ int getCheckSum(int val1, int val2);
 bool getSerialCmd();
 void pollSerial();
 bool processSerial();
+void dotsDelay(const int del, byte ndots, const byte row);
 
 #endif

@@ -31,6 +31,7 @@ extern float maxOutV;
 extern float maxMainsC;
 extern float maxOutC;
 extern float maxOutC1;
+extern byte CVreached;
 
 extern float V_o_mV;
 extern float divider_k_bV;
@@ -50,6 +51,8 @@ extern int32_t T_ADC;
 extern int32_t T2_ADC;
 
 extern float outC_ADC_f;
+
+extern int POWER_DIRECTION;
 
 extern struct config_t configuration;
 

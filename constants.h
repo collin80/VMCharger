@@ -48,14 +48,15 @@ const uint8_t pin_mV = 5;
 // const uint8_t pin_mC=7; // will only work in V12+ control boards (June 2013). needed only for full digital PFC control
 //========== digital pins
 // 0/1 reserved for serial comms with display etc
-const uint8_t pin_pwrCtrlButton = 2; // this is wired to the button (used for menu step)
-const uint8_t pin_pwrCtrl2Button = 3; // this is wired to the button2 (used for menu select)
-const uint8_t pin_inrelay = 4; // precharges input caps - normally pin 4, in some units pin 6 running fan relay
-const uint8_t pin_outrelay = 5;
-const uint8_t pin_DELTAQ = 6; // deltaQ pin
-const uint8_t pin_J1772 = 7; // J1772 pilot input. 1k is hardwired on V14+ pcbs so J1772 will power on on connect
-const uint8_t pin_fan = 8; // fan control - this is pin4 in all kits shipped before Mar '12
-const uint8_t pin_PWM = 9; // main PWM pin
+const byte pin_pwrCtrlButton = 2; // this is wired to the button (used for menu step)
+const byte pin_pwrCtrl2Button = 3; // this is wired to the button2 (used for menu select)
+const byte pin_inrelay = 4; // precharges input caps - normally pin 4, in some units pin 6 running fan relay
+const byte pin_outrelay=4; // output relay - this is needed for CHAdeMO; same pin to free up pin 5 for dual-direction units
+const byte pin_dirCtrl=5; // control of the direction of power flow - LOW=BUCK, HIGH=BOOST
+const byte pin_DELTAQ = 6; // deltaQ pin
+const byte pin_J1772 = 7; // J1772 pilot input. 1k is hardwired on V14+ pcbs so J1772 will power on on connect
+const byte pin_fan = 8; // fan control - this is pin4 in all kits shipped before Mar '12
+const byte pin_PWM = 9; // main PWM pin
 
 // max current reference voltage (using PWM) -  was 6 in the V13 pcb (kits shipped before March 2012)
 // now moved to pin 10 so that we can use higher PWM frequency 20kHz PWM
@@ -72,7 +73,10 @@ const uint8_t pin_BMS = 13;
 // absolute maximum average output current (used in CV mode) - leave at 0 here - will be set via power menu
 const float min_CV_Crating = 0.05; // wait until the current goes to XC (use values from your battery's datasheet)
 const float Cstep = 0.5; // how quickly the current tapers off in CV step - A / second. cannot be too high to prevent false stops
-const float peakMaxC = 1.8; // ratio between the average and max current in the inductor before overcurrent kicks in
+
+// ratio between the average and max current in the inductor before overcurrent kicks in. 1.8 is a good value
+// as it allows some ripple and some margin on top of that
+const float peakMaxC = 2.0; 
 
 #ifdef debugpower // increase power limits for testing runs - careful!
 const float absMaxChargerCurrent = 300; // 300A...
@@ -172,9 +176,18 @@ const float k_V_C =
 //=================================== END charger current sensor ==========================
 
 //===================== charger cycle timers =====================================
-// when changing stepDelay, keep stepDelay*measCycle_len within 0.5-1 sec
-const byte stepDelay = 30; // primary charger loop delay in milliseconds - should be less than 50 in order to run QC loop properly
-const byte measCycle_len = 15; // how many primary loop cycles per display cycle 
+// stepDelay is a delay between checking for serial commands and printing out the status to Serial line in a serial control mode
+// to get the actual delay between such reports, add ~30ms for the actual duration of the data transmission over serial line
+// when changing stepDelay, keep (stepDelay+30)*measCycle_len in the 500-1000 range 
+// higher stepDelay are advisable in case of non-CHADEMO applications
+#ifdef CHADEMO //adds up to 450ms
+  const byte stepDelay=30; // primary charger loop delay in milliseconds - should be less than 50 in order to run QC loop properly
+  const byte measCycle_len=15; // how many primary loop cycles per display cycle 
+#else //adds up to 800ms
+  const byte stepDelay=200; // primary charger loop delay in milliseconds 
+  const byte measCycle_len=4; // how many primary loop cycles per display cycle 
+#endif
+
 const byte AVGCycles = 10; // how many readings of C,V,T (taken every 4ms)  to average for reporting (to CHAdeMO) and display
 const byte stopCycles = 5; // how many primary charger cycles to require stop condition to exist before exiting
 const byte CV_timeout = 20; // what is the max duration (in secs) CV loop is allowed to spend below C stop; should be > ramp time of charger

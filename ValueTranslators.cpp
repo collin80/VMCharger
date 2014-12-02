@@ -9,9 +9,14 @@
 float getAllowedC(float userMaxC) {
 	char str[64];
 
-  userMaxC=min(userMaxC, absMaxChargerPower/maxOutV );
-  userMaxC=min(userMaxC, absMaxChargerCurrent); 
-  userMaxC=min(userMaxC, maxMainsC*mainsV/maxOutV);
+	userMaxC=min(userMaxC, absMaxChargerPower/maxOutV );
+	if(POWER_DIRECTION==1) {
+		userMaxC=min(userMaxC, absMaxChargerCurrent); 
+	} else {
+		// in this case, need to limit the inductor current to the absMaxChargerCurrent
+		userMaxC=min(userMaxC, absMaxChargerCurrent*mainsV/outV); 
+	}
+	userMaxC=min(userMaxC, maxMainsC*mainsV/maxOutV);
   
   // check thermal 
   if(normT>=maxHeatSinkT) {
@@ -48,44 +53,45 @@ float getAllowedC(float userMaxC) {
 //============================ current readout functions =====================
 //------------ calc current value from ADC value
 float readC() {
-  return (Aref/1024.*outC_ADC-V_o_C)/k_V_C
+	if(POWER_DIRECTION==1) {
+		return (Aref/1024.*outC_ADC-V_o_C)/k_V_C
 #ifdef NEG_CSENSE
-          *-1
+            *-1
 #endif
-          ;
+            ;
+	} else {
+		// scale according to input / output voltage settings
+		// since POWER_DIRECTION=-1 means we are boosting, outV is always going to be higher than input
+		return (Aref/1024.*outC_ADC-V_o_C)/k_V_C*(-1)*mainsV/outV
+#ifdef NEG_CSENSE
+            *-1
+#endif
+            ;
+	}
 }
 
 //============================ voltage readout functions =====================
 // output voltage
 float readV() {  
-  return (Aref/1024.*
-#ifdef DCDC_BUCK // output voltage is lV in case of buck
-          outmV_ADC
-#else 
-          outV_ADC
-#endif
-          -V_o_bV)*divider_k_bV;
+	if(DCDC_BUCK*POWER_DIRECTION==1) return (Aref/1024.*outmV_ADC-V_o_bV)*divider_k_bV;
+	return (Aref/1024.*outV_ADC-V_o_bV)*divider_k_bV;
 }
 
 // input voltage
 float read_mV() {
 #ifdef PC817 
-  // 3V is a threashold between 120V and 240V - but may require adjustment on a per-unit basis
-  if(Aref/1024.*outmV_ADC < 3) return 240;
-  return 120;
+	// 3V is a threashold between 120V and 240V - but may require adjustment on a per-unit basis
+	if(Aref/1024.*outmV_ADC < 3) return 240;
+	return 120;
 #endif
 
-  return (Aref/1024.*
-#ifdef DCDC_BUCK // input voltage is hV in case of buck
-          outV_ADC
+#ifdef DCinput
+	if(DCDC_BUCK*POWER_DIRECTION==1) return (Aref/1024.*outV_ADC-V_o_mV)*divider_k_mV;
+	else return (Aref/1024.*outmV_ADC-V_o_mV)*divider_k_mV;
 #else 
-          outmV_ADC
+	if(DCDC_BUCK*POWER_DIRECTION==1) return (Aref/1024.*outV_ADC-V_o_mV)*divider_k_mV/1.414;
+	else return (Aref/1024.*outmV_ADC-V_o_mV)*divider_k_mV/1.414;
 #endif
-          -V_o_mV)*divider_k_mV
-#ifndef DCinput
-          /1.41
-#endif
-          ;
 }
 //============================ end voltage readout functions =====================
 

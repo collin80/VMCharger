@@ -34,6 +34,17 @@ bool getSerialCmd()
         sprintf(str, "E:%d,%d", cmd[0], cmd[1]);
         sprintf(SerialCommand, "M,%03d,%03d,%03d,E", cmd[0], cmd[1], getCheckSum(cmd[0], cmd[1]) );
         EMWserialMsg(str);
+
+        if(cmd[0]>=500) {
+			POWER_DIRECTION=-1;
+			digitalWrite(pin_dirCtrl, HIGH);
+			cmd[0]-=500; // remove offset
+		} else {
+			POWER_DIRECTION=1;
+			digitalWrite(pin_dirCtrl, LOW);
+		}
+		delay(100);
+
         configuration.CC=cmd[0];
         maxOutV=cmd[1];     
         // move to charge stat
@@ -113,13 +124,39 @@ bool processSerial()
     }
     if(cmd[0]>1 && cmd[1]>1) {
 		// valid output power command
-        maxOutV=cmd[1];
-        maxOutC=maxOutC1=getAllowedC(cmd[0]); // this also allows for temp derating
+		// voltage
+		maxOutV=cmd[1];
+		// current
+		// FOR PROPERLY CONFIGURED QC-25 ONLY: 0-499 denotes positive flow (normally buck), 500-999 - negative (boost)
+		if(cmd[0]>=500) {
+			if(POWER_DIRECTION==1) {
+				// change in direction, stop PWM
+				PWM_enable_=0;
+				state = STATE_CHARGE_FINISH;
+				return -1; // halt
+			}
+			POWER_DIRECTION=-1;
+			cmd[0]-=500; // remove offset
+		} else {
+			if(POWER_DIRECTION==-1) {
+				// change in direction, stop PWM
+				PWM_enable_=0;
+				state = STATE_CHARGE_FINISH;
+				return -1;
+			}
+			POWER_DIRECTION=1;
+		}
+		// set the current to the requested value BUT ONLY if we are not exceeding maxOutV
+		// if maxOutV exceeded, the charger takes control and starts reducing the current
+		if(!CVreached) maxOutC=maxOutC1=getAllowedC(cmd[0]); // this also allows for temp derating (in getAllowedC)
+		state = STATE_CHARGE_START; //just to be sure we're still set up properly. START will automatically transition back to CHARGE_LOOP
+		PWM_enable_=1; // re-enable if needed
     } else {
 		// could be a special command
         // 'M,001,000,001,E' is STOP 
         if(cmd[0]==1 && cmd[1]==0) {
 			PWM_enable_=0;
+			state = STATE_CHARGE_FINISH;
             return false; // full stop
         }
     }
@@ -291,4 +328,16 @@ void printDigits(byte start, byte * digit, byte stat) {
 void printDigit(byte x, byte stat, char * str) {
   if(stat==0) printMsg(str, 0, x, 5, 0x1f, 0x3f, 0x0); // yellow
   if(stat==1) printMsg(str, 0, x, 5, 0x8, 0x8, 0x1f); // blue
+}
+
+// this prints running dots to keep user entertained during delays
+void dotsDelay(const int del, byte ndots, const byte row) {
+  for(; ndots>0; ndots--) {
+    if(LCD_on) {
+      myLCD->printStr(ndots, row, 2, 0, 0x1F, 0, ".");      
+      delay(del);
+    } else {
+      EMWserialMsg(".");
+    }      
+  }
 }
