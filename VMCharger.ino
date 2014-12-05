@@ -34,6 +34,7 @@ Original version created Jan 2011 by Valery Miftakhov, Electric Motor Werks, LLC
 #include "TimerOne.h"
 #include "Menu.h"
 #include "ValueTranslators.h"
+#include "buttons.h"
  
 struct config_t configuration;
 
@@ -328,6 +329,8 @@ void hardwareInit()
   pinMode(pin_maxC, OUTPUT);
   pinMode(pin_EOC, OUTPUT);
   pinMode(pin_fan, OUTPUT);
+
+  setupButtons(); //attach interrupts to the buttons
   
   // setup ADC
   ADMUX = B01000000;  // default to AVCC VRef, ADC Right Adjust, and ADC channel 0 (current)
@@ -364,7 +367,7 @@ void loadConfig()
 	EEPROM_readAnything(0, configuration);
 	// reset configuration if the green button is pressed at charger start
 	// on first connection, do zero cal of mainsV, as well
-	if(configuration.CC<=0 || digitalRead(pin_pwrCtrl2Button)==1) {
+	if(configuration.CC<=0 || isButton2Down()) {
 		forceConfig=1; // first time running the charger after assembly
 		configuration.CV=350;
 		// set the rest of the vars
@@ -459,7 +462,7 @@ void setupCalibration()
 	// this will generally NOT work on PFCdirect units as there is always voltage on the output
 	// to calibrate at the factory / right after build, power 12V ONLY and follow through calibration
 	//Loops now to give feedback on what the read voltage is. This allows one to see that it has actually drained.
-	while(!(digitalRead(pin_pwrCtrlButton) || digitalRead(pin_pwrCtrl2Button))) 
+	while(!(isButton1Down() || isButton2Down())) 
 	{
 		outV=readV();
 		sprintf(str, "Drain %dV, BTN   ", int(outV));  
@@ -496,9 +499,10 @@ void setupCalibration()
 		myLCD->clrScreen();
 		printConstStr(0, 0, 2, 0x1f, 0x3f, 0x00, MSG_LCD_CAL1); // this asks to connect the battery
 		delay(1000); // to avoid reading same button state as in prev step
+		clearButtons();
 		while(1) {
 			outV=readV();
-			if(digitalRead(pin_pwrCtrlButton) || digitalRead(pin_pwrCtrl2Button))  break;
+			if(isButton1Down() || isButton2Down())  break;
 			if(outV>20) { // loop until battery not connected
 				// battery has been connected, now need to wait until voltage stabilizes
 				// in units with 390R precharge, time constant is up to 4 seconds
@@ -880,7 +884,7 @@ int runChargeStep() {
 	}
       
 	// check if need to stop - RED button pressed? - both in LCD and non-LCD modes
-	if(digitalRead(pin_pwrCtrlButton)==HIGH) 
+	if(isButton1Down()) 
 	{
 		state = STATE_CHARGE_FINISH;
 		return 0;

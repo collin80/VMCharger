@@ -5,6 +5,7 @@
 #include "globals.h"
 #include "ConfigStruct.h"
 #include "ValueTranslators.h"
+#include "buttons.h"
 
 char str[64];
 char SerialStr[SerialStrSize+2]; // buffer for the serial command
@@ -232,7 +233,7 @@ unsigned int MenuSelector2(byte selection_total, const char * labels[])
 
   while(!selection)
   {
-    if(digitalRead(pin_pwrCtrlButton) == HIGH)
+    if(isButton1Down())
     {
       ++temp_selection;
       if(temp_selection > selection_total) temp_selection = 1;
@@ -244,17 +245,17 @@ unsigned int MenuSelector2(byte selection_total, const char * labels[])
       // alternatively myLCD can be re-purposed for this
     }
     else
-    if(digitalRead(pin_pwrCtrl2Button) == HIGH)
+    if(isButton2Down())
     {
       selection = temp_selection;
       printConstStr(0, 3, 2, 0x1f, 0x0, 0x0, MSG_LCD_BLANK);
       printLabel(labels[selection-1], 1, 3, 0x1f, 0x0, 0x0);
       // similar to the above, should delegate display to StatusDisplay object
     } 
-    delay(80);
+    delay(125);
   }
 
-  delay(200);
+  delay(250);
   
   return selection - 1;
 }
@@ -265,9 +266,9 @@ byte BtnTimeout(byte n, byte line) {
     sprintf(str, "%d sec ", n); 
     printMsg(str, 0, 0, line, 0x1f, 0x3f, 0);
 
-    for(byte k=0; k<100; k++) {
-      if(digitalRead(pin_pwrCtrlButton)==HIGH || digitalRead(pin_pwrCtrl2Button) == HIGH) return 1;
-      delay(10);
+    for(byte k=0; k<10; k++) {
+      if(isButton1Down() || isButton2Down()) return 1;
+      delay(100);
     }
     --n;
   }
@@ -283,7 +284,7 @@ int DecimalDigitInput3(int preset)
 
   while(x < 4)
   { 
-    if(digitalRead(pin_pwrCtrlButton) == HIGH) {
+    if(isButton1Down()) {
       if(x > 2) x = 0;
       else {
         // increment digit
@@ -293,7 +294,7 @@ int DecimalDigitInput3(int preset)
         if(digit[x] > 9) digit[x] = 0;
       }      
     } else 
-    if(digitalRead(pin_pwrCtrl2Button) == HIGH) {
+    if(isButton2Down()) {
       ++x;
     } 
 
@@ -309,7 +310,7 @@ int DecimalDigitInput3(int preset)
       printDigits(0, digit, 0);
     }
     
-    delay(150);
+    delay(200);
   }
   
   printDigits(8, digit, 0);
