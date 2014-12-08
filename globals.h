@@ -4,8 +4,8 @@
 //There are a lot of globals here which is certainly not proper form (not that it is strictly evil just frowned upon)
 
 extern uint8_t LCD_on;
-extern int32_t milliduty;
-extern float mainsV;
+extern volatile int32_t milliduty;
+extern volatile float mainsV;
 extern uint32_t sec_up;
 
 
@@ -18,8 +18,8 @@ extern uint32_t timer_comm;
 extern uint32_t timer_irq;
 extern uint32_t deltat;
 
-extern float outV;
-extern float outC;
+extern volatile float outV;
+extern volatile float outC;
 extern float AH_charger;
 
 extern uint8_t charger_run;
@@ -38,19 +38,19 @@ extern float divider_k_bV;
 extern float V_o_bV;
 extern float divider_k_mV;
 
-extern uint8_t PWM_enable_;
+extern volatile uint8_t PWM_enable_;
 
 extern float V_o_C;
 
-extern int32_t targetC_ADC;
-extern int32_t outC_ADC_0;
-extern int32_t outC_ADC;
-extern int32_t outV_ADC;
-extern int32_t outmV_ADC;
-extern int32_t T_ADC;
-extern int32_t T2_ADC;
+extern volatile int32_t targetC_ADC;
+extern volatile int32_t outC_ADC_0;
+extern volatile int32_t outC_ADC;
+extern volatile int32_t outV_ADC;
+extern volatile int32_t outmV_ADC;
+extern volatile int32_t T_ADC;
+extern volatile int32_t T2_ADC;
 
-extern float outC_ADC_f;
+extern volatile float outC_ADC_f;
 
 extern int POWER_DIRECTION;
 

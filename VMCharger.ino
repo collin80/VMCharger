@@ -38,7 +38,7 @@ Original version created Jan 2011 by Valery Miftakhov, Electric Motor Werks, LLC
  
 struct config_t configuration;
 
-uint8_t PWM_enable_ = 0; //by default disable PWM output until we are really ready for it
+volatile uint8_t PWM_enable_ = 0; //by default disable PWM output until we are really ready for it
 
 extern char str[64]; //temporary storage buffer
 float maxOutC = 0., maxOutC1 = 0;
@@ -80,7 +80,7 @@ uint8_t breakCycle=0;
 uint32_t timer=0, timer_ch=0, timer_comm=0, timer_irq=0, deltat=0;
 uint32_t sec_up = 0;
 
-float mainsV=0, outV=0, outC=0;
+volatile float mainsV=0, outV=0, outC=0;
 float AH_charger=0;
 
 uint8_t charger_run=0;
@@ -101,9 +101,9 @@ int J1772_dur;
 //---------------------------------------------------------------------------------------------------------
 // all these have to be ints or very unpleasant wrapping will occur in PID loop 
 // having these unsigned has cost EmotorWerks over $1,000 in parts during testing ;-)
-int32_t targetC_ADC=0; // this is an ADC reference point for our output current
-int32_t outC_ADC_0 = 0, outC_ADC = 0, outV_ADC = 0, outmV_ADC = 0, T_ADC = 0, T2_ADC = 0;
-float outC_ADC_f=0;
+volatile int32_t targetC_ADC=0; // this is an ADC reference point for our output current
+volatile int32_t outC_ADC_0 = 0, outC_ADC = 0, outV_ADC = 0, outmV_ADC = 0, T_ADC = 0, T2_ADC = 0;
+volatile float outC_ADC_f=0;
 
 // ADC interrput handler
 // this is always aligned with Timer1 interrupt
@@ -194,12 +194,13 @@ ISR(ADC_vect) { // Analog->Digital Conversion Complete
 
 int32_t pids_Kp = 0;
 long pids_err=0, pids_perr=0, pids_i=0, pids_d=0; // all have to be signed longs in order to not screw up pid calcs
-long deltaDuty=0, milliduty=0; // have to be signed
-byte tickerPWM=0; // short counter used only to skip cycles
-byte tickerPWM1=0; // counter counting unskipped cycles - ok to overwrap
+volatile long deltaDuty=0, milliduty=0; // have to be signed
+volatile byte tickerPWM=0; // short counter used only to skip cycles
+volatile byte tickerPWM1=0; // counter counting unskipped cycles - ok to overwrap
 
 // called on overflow of Timer1 - called every 'period' uS (20 kHz by default)
 // overflow with TimerOne library means we are in the center of the PWM cycle (TimerOne is phase correct)
+//This function is called in interrupt handler context so all variables modified (that are used outside of this function as well) must be volatile.
 void sampleInterrupt() {
   // trigger actual work only on every Nth period
   tickerPWM++;
