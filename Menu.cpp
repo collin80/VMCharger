@@ -253,9 +253,11 @@ unsigned int MenuSelector2(byte selection_total, const char * labels[])
       // similar to the above, should delegate display to StatusDisplay object
     } 
     delay(125);
+	clearButtons();
   }
 
   delay(250);
+  clearButtons();
   
   return selection - 1;
 }
