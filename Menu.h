@@ -17,12 +17,12 @@ void printClrMsg(const uint8_t msg_id, const int del, const uint8_t red, const u
 void printConstStr(int col, int row, int font, uint8_t red, uint8_t green, uint8_t blue, const uint8_t msg_id);
 void printLabel(const char * label, const uint8_t col, const uint8_t row, const uint8_t red, const uint8_t green, const uint8_t blue);
 void printMsg(char *str_, const int del, const uint8_t col, const uint8_t row, const uint8_t red, const uint8_t green, const uint8_t blue);
-unsigned int MenuSelector2(uint8_t selection_total, const char * labels[]);
+unsigned int MenuSelector2(uint8_t selection_total, char * labels[]);
 uint8_t BtnTimeout(uint8_t n, uint8_t line);
 int DecimalDigitInput3(int preset);
 void printDigits(uint8_t start, uint8_t * digit, uint8_t stat);
 void printDigit(uint8_t x, uint8_t stat, char * str);
-void EMWserialMsg(const char *txt);
+void EMWserialMsg(char *txt);
 void readSerialCmd(int *cmd_);
 int getCheckSum(int val1, int val2);
 bool getSerialCmd();

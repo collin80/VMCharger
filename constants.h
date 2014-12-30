@@ -58,6 +58,8 @@ const byte pin_J1772 = 7; // J1772 pilot input. 1k is hardwired on V14+ pcbs so 
 const byte pin_fan = 8; // fan control - this is pin4 in all kits shipped before Mar '12
 const byte pin_PWM = 9; // main PWM pin
 
+const byte EEPROM_CSPIN = 52;  // EEPROM Chip Select attached to pin 52
+
 // max current reference voltage (using PWM) -  was 6 in the V13 pcb (kits shipped before March 2012)
 // now moved to pin 10 so that we can use higher PWM frequency 20kHz PWM
 const uint8_t pin_maxC = 10;
@@ -202,21 +204,21 @@ const int32_t pids_Ki = 1; // need small integral term - otherwise we get some c
 const int32_t pids_Kd = 0; // for now, just PI loop
 
 //these are the general system loop states
-const uint8_t STATE_TOP_MENU = 0x00;
-const uint8_t STATE_CONFIG_PWR = 0x01;
-const uint8_t STATE_CONFIG_TIMER = 0x02;
-const uint8_t STATE_STARTUP_CFG = 0x03;
-const uint8_t STATE_CHARGE_START = 0x04; //charging getting set up
-const uint8_t STATE_CHARGE_LOOP = 0x05; //charging is ongoing
-const uint8_t STATE_CHARGE_FINISH = 0x06; //quit charging and set everything inert again
-const uint8_t STATE_WAIT_TIMEOUT = 0x08;
-const uint8_t STATE_SERIALCONTROL = 0x10;
-const uint8_t STATE_SETUP_CV = 0x20; //per cell voltage
-const uint8_t STATE_SETUP_CELLS = 0x21; //# of cells in pack
-const uint8_t STATE_SETUP_CAPACITY = 0x22; //capacity of pack
-const uint8_t STATE_SETUP_CALIBRATE = 0x23; // sensitivity calibration only. zero point calibration done automatically on power-on
-const uint8_t STATE_FACTORY_RESET = 0xDB; //clear all configuration and restart setup process.
-const uint8_t STATE_SHUTDOWN = 0xff;
+#define STATE_TOP_MENU 0x00
+#define STATE_CONFIG_PWR 0x01
+#define STATE_CONFIG_TIMER 0x02
+#define STATE_STARTUP_CFG 0x03
+#define STATE_CHARGE_START 0x04 //charging getting set up
+#define STATE_CHARGE_LOOP 0x05 //charging is ongoing
+#define STATE_CHARGE_FINISH 0x06 //quit charging and set everything inert again
+#define STATE_WAIT_TIMEOUT 0x08
+#define STATE_SERIALCONTROL 0x10
+#define STATE_SETUP_CV 0x20 //per cell voltage
+#define STATE_SETUP_CELLS 0x21 //# of cells in pack
+#define STATE_SETUP_CAPACITY 0x22 //capacity of pack
+#define STATE_SETUP_CALIBRATE 0x23 // sensitivity calibration only. zero point calibration done automatically on power-on
+#define STATE_FACTORY_RESET 0xDB //clear all configuration and restart setup process.
+#define STATE_SHUTDOWN 0xff
 
 const uint8_t MSG_THX = 0x00;
 const uint8_t MSG_NOBATT = 0x01;
@@ -254,47 +256,47 @@ const uint8_t configMenuLen = 4;
 static const char * configMenu[] = { "Run  ", "Pwr  ", "Time ", "RESET"};
 
 #ifndef LCD_SPE
-  const char msg_long_0[] PROGMEM = "Thank you for choosing EMotorWerks! BTN to CFG";
-  const char msg_short_0[] PROGMEM = "INIT";
-  const char msg_long_1[] PROGMEM = "No batt or reverse! ANY BTN to ignore";
-  const char msg_short_1[] PROGMEM = "NOBATT";
-  const char msg_long_2[] PROGMEM = "Wrong profile!";
-  const char msg_short_2[] PROGMEM = "WRONGPROF";
-  const char msg_long_3[] PROGMEM = "BMS Stop";
-  const char msg_short_3[] PROGMEM = "BMSSTOP";
-  const char msg_long_4[] PROGMEM = "Timeout";
-  const char msg_short_4[] PROGMEM = "TIMEOUT";
-  const char msg_long_5[] PROGMEM = "Paused. RED BTN to exit, GRN to resume";
-  const char msg_short_5[] PROGMEM = "USRPAUSE";
-  const char msg_long_6[] PROGMEM = "Lost AC";
-  const char msg_short_6[] PROGMEM = "LOSTIN";
-  const char msg_long_7[] PROGMEM = "Sensor/cal error. Recal/chk wiring";
-  const char msg_short_7[] PROGMEM = "SENSEERROR";
-  const char msg_long_8[] PROGMEM = "Step complete";
-  const char msg_short_8[] PROGMEM = "NORMEXIT";
-  const char msg_long_9[] PROGMEM = "Complete! GRN BTN to repeat";
-  const char msg_short_9[] PROGMEM = "DONE";
+  const char msg_long_0[] = "Thank you for choosing EMotorWerks! BTN to CFG";
+  const char msg_short_0[] = "INIT";
+  const char msg_long_1[] = "No batt or reverse! ANY BTN to ignore";
+  const char msg_short_1[] = "NOBATT";
+  const char msg_long_2[] = "Wrong profile!";
+  const char msg_short_2[] = "WRONGPROF";
+  const char msg_long_3[] = "BMS Stop";
+  const char msg_short_3[] = "BMSSTOP";
+  const char msg_long_4[] = "Timeout";
+  const char msg_short_4[] = "TIMEOUT";
+  const char msg_long_5[] = "Paused. RED BTN to exit, GRN to resume";
+  const char msg_short_5[] = "USRPAUSE";
+  const char msg_long_6[] = "Lost AC";
+  const char msg_short_6[] = "LOSTIN";
+  const char msg_long_7[] = "Sensor/cal error. Recal/chk wiring";
+  const char msg_short_7[] = "SENSEERROR";
+  const char msg_long_8[] = "Step complete";
+  const char msg_short_8[] = "NORMEXIT";
+  const char msg_long_9[] = "Complete! GRN BTN to repeat";
+  const char msg_short_9[] = "DONE";
 #else 
-  const char msg_long_0[] PROGMEM = "Thank you for\nchoosing\nEMotorWerks!\nBTN to CFG";
-  const char msg_short_0[] PROGMEM = "INIT";
-  const char msg_long_1[] PROGMEM = "No batt or reverse! \nANY BTN to ignore";
-  const char msg_short_1[] PROGMEM = "NOBATT";
-  const char msg_long_2[] PROGMEM = "Wrong profile!";
-  const char msg_short_2[] PROGMEM = "WRONGPROF";
-  const char msg_long_3[] PROGMEM = "BMS Stop";
-  const char msg_short_3[] PROGMEM = "BMSSTOP";
-  const char msg_long_4[] PROGMEM = "Timeout";
-  const char msg_short_4[] PROGMEM = "TIMEOUT";
-  const char msg_long_5[] PROGMEM = "Paused. RED BTN \nto exit, GRN to \nresume";
-  const char msg_short_5[] PROGMEM = "USRPAUSE";
-  const char msg_long_6[] PROGMEM = "Lost AC";
-  const char msg_short_6[] PROGMEM = "LOSTIN";
-  const char msg_long_7[] PROGMEM = "Sensor/cal error. \nRecal/chk wiring";
-  const char msg_short_7[] PROGMEM = "SENSEERROR";
-  const char msg_long_8[] PROGMEM = "Step complete";
-  const char msg_short_8[] PROGMEM = "NORMEXIT";
-  const char msg_long_9[] PROGMEM = "Complete! GRN BTN \nto repeat";
-  const char msg_short_9[] PROGMEM = "DONE";
+  const char msg_long_0[] = "Thank you for\nchoosing\nEMotorWerks!\nBTN to CFG";
+  const char msg_short_0[] = "INIT";
+  const char msg_long_1[] = "No batt or reverse! \nANY BTN to ignore";
+  const char msg_short_1[] = "NOBATT";
+  const char msg_long_2[] = "Wrong profile!";
+  const char msg_short_2[] = "WRONGPROF";
+  const char msg_long_3[] = "BMS Stop";
+  const char msg_short_3[] = "BMSSTOP";
+  const char msg_long_4[] = "Timeout";
+  const char msg_short_4[] = "TIMEOUT";
+  const char msg_long_5[] = "Paused. RED BTN \nto exit, GRN to \nresume";
+  const char msg_short_5[] = "USRPAUSE";
+  const char msg_long_6[] = "Lost AC";
+  const char msg_short_6[] = "LOSTIN";
+  const char msg_long_7[] = "Sensor/cal error. \nRecal/chk wiring";
+  const char msg_short_7[] = "SENSEERROR";
+  const char msg_long_8[] = "Step complete";
+  const char msg_short_8[] = "NORMEXIT";
+  const char msg_long_9[] = "Complete! GRN BTN \nto repeat";
+  const char msg_short_9[] = "DONE";
 #endif
 
 PROGMEM const char* const msg_long_table[] = 	  
@@ -326,39 +328,39 @@ PROGMEM const char* const msg_short_table[] =
 };
 
 #ifndef LCD_SPE
-  const char msg_lcd_0[] PROGMEM = "Cell Type:       ";
-  const char msg_lcd_1[] PROGMEM = "CV cutoff:       ";
-  const char msg_lcd_2[] PROGMEM = "Number of cells: ";
-  const char msg_lcd_3[] PROGMEM = "Capacity:        ";
-  const char msg_lcd_4[] PROGMEM = "Calibrated zero";
-  const char msg_lcd_5[] PROGMEM = "Connect batt. BTN to skip";
-  const char msg_lcd_6[] PROGMEM = "Enter actual batt voltage:";
-  const char msg_lcd_7[] PROGMEM = "Confirm:      ";
-  const char msg_lcd_8[] PROGMEM = "Params      ";
-  const char msg_lcd_9[] PROGMEM = "press BTN to adjust";
-  const char msg_lcd_10[] PROGMEM = "Action:                   ";
-  const char msg_lcd_11[] PROGMEM = "max INput current ";
-  const char msg_lcd_12[] PROGMEM = "max OUTput current";
-  const char msg_lcd_13[] PROGMEM = "timeout (#min or 0):";
-  const char msg_lcd_14[] PROGMEM = "Confirm CHARGE:";
-  const char msg_lcd_15[] PROGMEM = "[           ]";
+  const char msg_lcd_0[] = "Cell Type:       ";
+  const char msg_lcd_1[] = "CV cutoff:       ";
+  const char msg_lcd_2[] = "Number of cells: ";
+  const char msg_lcd_3[] = "Capacity:        ";
+  const char msg_lcd_4[] = "Calibrated zero";
+  const char msg_lcd_5[] = "Connect batt. BTN to skip";
+  const char msg_lcd_6[] = "Enter actual batt voltage:";
+  const char msg_lcd_7[] = "Confirm:      ";
+  const char msg_lcd_8[] = "Params      ";
+  const char msg_lcd_9[] = "press BTN to adjust";
+  const char msg_lcd_10[] = "Action:                   ";
+  const char msg_lcd_11[] = "max INput current ";
+  const char msg_lcd_12[] = "max OUTput current";
+  const char msg_lcd_13[] = "timeout (#min or 0):";
+  const char msg_lcd_14[] = "Confirm CHARGE:";
+  const char msg_lcd_15[] = "[           ]";
 #else
-  const char msg_lcd_0[] PROGMEM = "Cell Type:       ";
-  const char msg_lcd_1[] PROGMEM = "CV cutoff:       ";
-  const char msg_lcd_2[] PROGMEM = "Number of cells: ";
-  const char msg_lcd_3[] PROGMEM = "Capacity:        ";
-  const char msg_lcd_4[] PROGMEM = "Calibrated zero";
-  const char msg_lcd_5[] PROGMEM = "Connect batt. BTN \nto skip";
-  const char msg_lcd_6[] PROGMEM = "Enter actual \nbatt voltage:";
-  const char msg_lcd_7[] PROGMEM = "Confirm:      ";
-  const char msg_lcd_8[] PROGMEM = "Params      ";
-  const char msg_lcd_9[] PROGMEM = "press BTN to\nadjust";
-  const char msg_lcd_10[] PROGMEM = "Action:                   ";
-  const char msg_lcd_11[] PROGMEM = "max INput current ";
-  const char msg_lcd_12[] PROGMEM = "max OUTput current";
-  const char msg_lcd_13[] PROGMEM = "timeout (#min or 0):";
-  const char msg_lcd_14[] PROGMEM = "Confirm CHARGE:";
-  const char msg_lcd_15[] PROGMEM = "[           ]";
+  const char msg_lcd_0[] = "Cell Type:       ";
+  const char msg_lcd_1[] = "CV cutoff:       ";
+  const char msg_lcd_2[] = "Number of cells: ";
+  const char msg_lcd_3[] = "Capacity:        ";
+  const char msg_lcd_4[] = "Calibrated zero";
+  const char msg_lcd_5[] = "Connect batt. BTN \nto skip";
+  const char msg_lcd_6[] = "Enter actual \nbatt voltage:";
+  const char msg_lcd_7[] = "Confirm:      ";
+  const char msg_lcd_8[] = "Params      ";
+  const char msg_lcd_9[] = "press BTN to\nadjust";
+  const char msg_lcd_10[] = "Action:                   ";
+  const char msg_lcd_11[] = "max INput current ";
+  const char msg_lcd_12[] = "max OUTput current";
+  const char msg_lcd_13[] = "timeout (#min or 0):";
+  const char msg_lcd_14[] = "Confirm CHARGE:";
+  const char msg_lcd_15[] = "[           ]";
 #endif
 
 PROGMEM const char* const msg_lcd_table[] = 	  
