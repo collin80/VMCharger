@@ -33,6 +33,7 @@ Original version created Jan 2011 by Valery Miftakhov, Electric Motor Werks, LLC
 #include "Menu.h"
 #include "ValueTranslators.h"
 #include "buttons.h"
+#include "pwm01.h"
 
 struct config_t configuration;
 
@@ -300,7 +301,9 @@ void sampleInterrupt() {
             PWM_enable_=0;
           }
 
-          Timer1.setPwmDuty(pin_PWM, milliduty/10000);
+          //Timer1.setPwmDuty(pin_PWM, milliduty/10000);
+		  //previous max was 1024 but this library uses 0-255 so need to take milliduty down to quarter of what it used to be
+		  pwm_write_duty(pin_PWM, milliduty / 40000); 
 
           break;
        }
@@ -345,13 +348,19 @@ void hardwareInit()
   // 64 prescaler results in ~50uS conversion time
   ADCSRA = B11001111;
 
+  
+
   // setup timer - has to be before any ADC readouts
-  Timer1.initialize(period);
-  Timer1.pwm(pin_PWM, 0); // need this here to enable interrupt
-  Timer1.pwm(pin_maxC, 0); // need this here to enable interrupt
   Timer1.attachInterrupt(&sampleInterrupt); // attach our main ADC / PID interrupt
   delay(50); // allow interrupts to fill in all analog values
 */
+  pwm_setup(pin_PWM, PWMFreq, 1);  
+  pwm_write_duty(pin_PWM, 0);
+  //maxC is on pin 10 which isn't a normal PWM pin and is not supported by the pwm01 library
+  //pwm_setup(pin_maxC, PWMFreq, 1);
+  //pwm_write_duty(pin_maxC, 0);
+
+
     //================= initialize the display ===========================================
 #ifdef LCD_SPE
   *myLCD=uLCD_144_SPE(9600);

@@ -22,13 +22,13 @@ void button2Int()
 void setupButtons()
 {
 	//for the Due you'd use these two lines
-	//attachInterrupt(pin_pwrCtrlButton, button1Int, RISING);
-	//attachInterrupt(pin_pwrCtrl2Button, button2Int, RISING);
+	attachInterrupt(pin_pwrCtrlButton, button1Int, RISING);
+	attachInterrupt(pin_pwrCtrl2Button, button2Int, RISING);
 
 	//But, the ATMEGA chip has only two interrupts and they are 0 and 1 so use the below instead
 	//luckily, the two interrupts on the ATMEGA just happen to be on the two button pins
-	attachInterrupt(0, button1Int, RISING);
-	attachInterrupt(1, button2Int, RISING);
+	//attachInterrupt(0, button1Int, RISING);
+	//attachInterrupt(1, button2Int, RISING);
 
 	clearButtons();
 }

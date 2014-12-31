@@ -107,16 +107,53 @@ void  pwm_setup( uint32_t  pwm_pin,  uint32_t  pwm_freq,  int iclock  )
 
 // WRITE DUTY CYCLE
 //--------------------------------
-void  pwm_write_duty( uint32_t  pwm_pin,  uint32_t  pwm_duty ) 
+void  pwm_write_duty( uint32_t  ulPin,  uint32_t  pwm_duty ) 
 {
-    if (pwm_pin>=6 && pwm_pin<=9)
+	uint32_t attr = g_APinDescription[ulPin].ulPinAttribute;
+
+    if ((attr & PIN_ATTR_PWM) == PIN_ATTR_PWM) {
     {    
         pwm_duty = mapResolution( pwm_duty, pwm_resolution_nbit, PWM_RESOLUTION);
         
-        uint32_t  chan = g_APinDescription[pwm_pin].ulPWMChannel;
+        uint32_t  chan = g_APinDescription[ulPin].ulPWMChannel;
        
         PWMC_SetDutyCycle(PWM_INTERFACE, chan, pwm_duty);
     }
+
+	if ((attr & PIN_ATTR_TIMER) == PIN_ATTR_TIMER) {
+		ulValue = mapResolution(pwm_duty, pwm_resolution_nbit, PWM_RESOLUTION);
+		ulValue = ulValue * TC;
+		ulValue = ulValue / TC_MAX_DUTY_CYCLE;
+
+		// Setup Timer for this pin
+		ETCChannel channel = g_APinDescription[ulPin].ulTCChannel;
+		static const uint32_t channelToChNo[] = { 0, 0, 1, 1, 2, 2, 0, 0, 1, 1, 2, 2, 0, 0, 1, 1, 2, 2 };		
+		static Tc *channelToTC[] = {
+			TC0, TC0, TC0, TC0, TC0, TC0,
+			TC1, TC1, TC1, TC1, TC1, TC1,
+			TC2, TC2, TC2, TC2, TC2, TC2 };
+		static const uint32_t channelToId[] = { 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8 };
+		uint32_t chNo = channelToChNo[channel];		
+		Tc *chTC = channelToTC[channel];
+
+		if (ulValue == 0) {
+			if (chA)
+				TC_SetCMR_ChannelA(chTC, chNo, TC_CMR_ACPA_CLEAR | TC_CMR_ACPC_CLEAR);
+			else
+				TC_SetCMR_ChannelB(chTC, chNo, TC_CMR_BCPB_CLEAR | TC_CMR_BCPC_CLEAR);
+		} else {
+			if (chA) {
+				TC_SetRA(chTC, chNo, ulValue);
+				TC_SetCMR_ChannelA(chTC, chNo, TC_CMR_ACPA_CLEAR | TC_CMR_ACPC_SET);
+			} else {
+				TC_SetRB(chTC, chNo, ulValue);
+				TC_SetCMR_ChannelB(chTC, chNo, TC_CMR_BCPB_CLEAR | TC_CMR_BCPC_SET);
+			}
+		}
+	}
+
+
+
 };
 
 
