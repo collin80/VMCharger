@@ -9,7 +9,6 @@
 #ifndef CONSTANTS_H_
 #define CONSTANTS_H_
 
-#include <avr/pgmspace.h>
 #include <Arduino.h>
 
 //Don't change this hard coded value!
@@ -118,7 +117,7 @@ const byte midHeatSinkT = 45; // turn on the fans here; also wait until cool dow
 const byte lowHeatSinkT = 35; // turn off the fans here 
 //--------------------------------------------------------
 
-const float Aref = 5.0f; // 5V for ATMega328 (Pro Mini), 3.3V for ATSAM (Due) 
+const float Aref = 3.3f; // 5V for ATMega328 (Pro Mini), 3.3V for ATSAM (Due) 
 
 //=============== voltage dividers settings ===========================
 //--------- some constants for 7520 chips
@@ -254,50 +253,50 @@ const uint8_t configMenuLen = 4;
 static const char * configMenu[] = { "Run  ", "Pwr  ", "Time ", "RESET"};
 
 #ifndef LCD_SPE
-  const char msg_long_0[] PROGMEM = "Thank you for choosing EMotorWerks! BTN to CFG";
-  const char msg_short_0[] PROGMEM = "INIT";
-  const char msg_long_1[] PROGMEM = "No batt or reverse! ANY BTN to ignore";
-  const char msg_short_1[] PROGMEM = "NOBATT";
-  const char msg_long_2[] PROGMEM = "Wrong profile!";
-  const char msg_short_2[] PROGMEM = "WRONGPROF";
-  const char msg_long_3[] PROGMEM = "BMS Stop";
-  const char msg_short_3[] PROGMEM = "BMSSTOP";
-  const char msg_long_4[] PROGMEM = "Timeout";
-  const char msg_short_4[] PROGMEM = "TIMEOUT";
-  const char msg_long_5[] PROGMEM = "Paused. RED BTN to exit, GRN to resume";
-  const char msg_short_5[] PROGMEM = "USRPAUSE";
-  const char msg_long_6[] PROGMEM = "Lost AC";
-  const char msg_short_6[] PROGMEM = "LOSTIN";
-  const char msg_long_7[] PROGMEM = "Sensor/cal error. Recal/chk wiring";
-  const char msg_short_7[] PROGMEM = "SENSEERROR";
-  const char msg_long_8[] PROGMEM = "Step complete";
-  const char msg_short_8[] PROGMEM = "NORMEXIT";
-  const char msg_long_9[] PROGMEM = "Complete! GRN BTN to repeat";
-  const char msg_short_9[] PROGMEM = "DONE";
+  const char msg_long_0[] = "Thank you for choosing EMotorWerks! BTN to CFG";
+  const char msg_short_0[] = "INIT";
+  const char msg_long_1[] = "No batt or reverse! ANY BTN to ignore";
+  const char msg_short_1[] = "NOBATT";
+  const char msg_long_2[]  = "Wrong profile!";
+  const char msg_short_2[] = "WRONGPROF";
+  const char msg_long_3[] = "BMS Stop";
+  const char msg_short_3[] = "BMSSTOP";
+  const char msg_long_4[] = "Timeout";
+  const char msg_short_4[] = "TIMEOUT";
+  const char msg_long_5[] = "Paused. RED BTN to exit, GRN to resume";
+  const char msg_short_5[] = "USRPAUSE";
+  const char msg_long_6[] = "Lost AC";
+  const char msg_short_6[] = "LOSTIN";
+  const char msg_long_7[] = "Sensor/cal error. Recal/chk wiring";
+  const char msg_short_7[] = "SENSEERROR";
+  const char msg_long_8[] = "Step complete";
+  const char msg_short_8[] = "NORMEXIT";
+  const char msg_long_9[] = "Complete! GRN BTN to repeat";
+  const char msg_short_9[] = "DONE";
 #else 
-  const char msg_long_0[] PROGMEM = "Thank you for\nchoosing\nEMotorWerks!\nBTN to CFG";
-  const char msg_short_0[] PROGMEM = "INIT";
-  const char msg_long_1[] PROGMEM = "No batt or reverse! \nANY BTN to ignore";
-  const char msg_short_1[] PROGMEM = "NOBATT";
-  const char msg_long_2[] PROGMEM = "Wrong profile!";
-  const char msg_short_2[] PROGMEM = "WRONGPROF";
-  const char msg_long_3[] PROGMEM = "BMS Stop";
-  const char msg_short_3[] PROGMEM = "BMSSTOP";
-  const char msg_long_4[] PROGMEM = "Timeout";
-  const char msg_short_4[] PROGMEM = "TIMEOUT";
-  const char msg_long_5[] PROGMEM = "Paused. RED BTN \nto exit, GRN to \nresume";
-  const char msg_short_5[] PROGMEM = "USRPAUSE";
-  const char msg_long_6[] PROGMEM = "Lost AC";
-  const char msg_short_6[] PROGMEM = "LOSTIN";
-  const char msg_long_7[] PROGMEM = "Sensor/cal error. \nRecal/chk wiring";
-  const char msg_short_7[] PROGMEM = "SENSEERROR";
-  const char msg_long_8[] PROGMEM = "Step complete";
-  const char msg_short_8[] PROGMEM = "NORMEXIT";
-  const char msg_long_9[] PROGMEM = "Complete! GRN BTN \nto repeat";
-  const char msg_short_9[] PROGMEM = "DONE";
+  const char msg_long_0[] = "Thank you for\nchoosing\nEMotorWerks!\nBTN to CFG";
+  const char msg_short_0[] = "INIT";
+  const char msg_long_1[] = "No batt or reverse! \nANY BTN to ignore";
+  const char msg_short_1[] = "NOBATT";
+  const char msg_long_2[] = "Wrong profile!";
+  const char msg_short_2[] = "WRONGPROF";
+  const char msg_long_3[] = "BMS Stop";
+  const char msg_short_3[] = "BMSSTOP";
+  const char msg_long_4[] = "Timeout";
+  const char msg_short_4[] = "TIMEOUT";
+  const char msg_long_5[] = "Paused. RED BTN \nto exit, GRN to \nresume";
+  const char msg_short_5[] = "USRPAUSE";
+  const char msg_long_6[] = "Lost AC";
+  const char msg_short_6[] = "LOSTIN";
+  const char msg_long_7[] = "Sensor/cal error. \nRecal/chk wiring";
+  const char msg_short_7[] = "SENSEERROR";
+  const char msg_long_8[] = "Step complete";
+  const char msg_short_8[] = "NORMEXIT";
+  const char msg_long_9[] = "Complete! GRN BTN \nto repeat";
+  const char msg_short_9[] = "DONE";
 #endif
 
-PROGMEM const char* const msg_long_table[] = 	  
+ const char* const msg_long_table[] = 	  
 {   
   msg_long_0,
   msg_long_1,
@@ -311,7 +310,7 @@ PROGMEM const char* const msg_long_table[] =
   msg_long_9
 };
 
-PROGMEM const char* const msg_short_table[] = 	  
+ const char* const msg_short_table[] = 	  
 {   
   msg_short_0,
   msg_short_1,
@@ -326,42 +325,42 @@ PROGMEM const char* const msg_short_table[] =
 };
 
 #ifndef LCD_SPE
-  const char msg_lcd_0[] PROGMEM = "Cell Type:       ";
-  const char msg_lcd_1[] PROGMEM = "CV cutoff:       ";
-  const char msg_lcd_2[] PROGMEM = "Number of cells: ";
-  const char msg_lcd_3[] PROGMEM = "Capacity:        ";
-  const char msg_lcd_4[] PROGMEM = "Calibrated zero";
-  const char msg_lcd_5[] PROGMEM = "Connect batt. BTN to skip";
-  const char msg_lcd_6[] PROGMEM = "Enter actual batt voltage:";
-  const char msg_lcd_7[] PROGMEM = "Confirm:      ";
-  const char msg_lcd_8[] PROGMEM = "Params      ";
-  const char msg_lcd_9[] PROGMEM = "press BTN to adjust";
-  const char msg_lcd_10[] PROGMEM = "Action:                   ";
-  const char msg_lcd_11[] PROGMEM = "max INput current ";
-  const char msg_lcd_12[] PROGMEM = "max OUTput current";
-  const char msg_lcd_13[] PROGMEM = "timeout (#min or 0):";
-  const char msg_lcd_14[] PROGMEM = "Confirm CHARGE:";
-  const char msg_lcd_15[] PROGMEM = "[           ]";
+  const char msg_lcd_0[] = "Cell Type:       ";
+  const char msg_lcd_1[] = "CV cutoff:       ";
+  const char msg_lcd_2[] = "Number of cells: ";
+  const char msg_lcd_3[] = "Capacity:        ";
+  const char msg_lcd_4[] = "Calibrated zero";
+  const char msg_lcd_5[] = "Connect batt. BTN to skip";
+  const char msg_lcd_6[] = "Enter actual batt voltage:";
+  const char msg_lcd_7[] = "Confirm:      ";
+  const char msg_lcd_8[] = "Params      ";
+  const char msg_lcd_9[] = "press BTN to adjust";
+  const char msg_lcd_10[] = "Action:                   ";
+  const char msg_lcd_11[] = "max INput current ";
+  const char msg_lcd_12[] = "max OUTput current";
+  const char msg_lcd_13[] = "timeout (#min or 0):";
+  const char msg_lcd_14[] = "Confirm CHARGE:";
+  const char msg_lcd_15[] = "[           ]";
 #else
-  const char msg_lcd_0[] PROGMEM = "Cell Type:       ";
-  const char msg_lcd_1[] PROGMEM = "CV cutoff:       ";
-  const char msg_lcd_2[] PROGMEM = "Number of cells: ";
-  const char msg_lcd_3[] PROGMEM = "Capacity:        ";
-  const char msg_lcd_4[] PROGMEM = "Calibrated zero";
-  const char msg_lcd_5[] PROGMEM = "Connect batt. BTN \nto skip";
-  const char msg_lcd_6[] PROGMEM = "Enter actual \nbatt voltage:";
-  const char msg_lcd_7[] PROGMEM = "Confirm:      ";
-  const char msg_lcd_8[] PROGMEM = "Params      ";
-  const char msg_lcd_9[] PROGMEM = "press BTN to\nadjust";
-  const char msg_lcd_10[] PROGMEM = "Action:                   ";
-  const char msg_lcd_11[] PROGMEM = "max INput current ";
-  const char msg_lcd_12[] PROGMEM = "max OUTput current";
-  const char msg_lcd_13[] PROGMEM = "timeout (#min or 0):";
-  const char msg_lcd_14[] PROGMEM = "Confirm CHARGE:";
-  const char msg_lcd_15[] PROGMEM = "[           ]";
+  const char msg_lcd_0[] = "Cell Type:       ";
+  const char msg_lcd_1[] = "CV cutoff:       ";
+  const char msg_lcd_2[] = "Number of cells: ";
+  const char msg_lcd_3[] = "Capacity:        ";
+  const char msg_lcd_4[] = "Calibrated zero";
+  const char msg_lcd_5[] = "Connect batt. BTN \nto skip";
+  const char msg_lcd_6[] = "Enter actual \nbatt voltage:";
+  const char msg_lcd_7[] = "Confirm:      ";
+  const char msg_lcd_8[] = "Params      ";
+  const char msg_lcd_9[] = "press BTN to\nadjust";
+  const char msg_lcd_10[] = "Action:                   ";
+  const char msg_lcd_11[] = "max INput current ";
+  const char msg_lcd_12[] = "max OUTput current";
+  const char msg_lcd_13[] = "timeout (#min or 0):";
+  const char msg_lcd_14[] = "Confirm CHARGE:";
+  const char msg_lcd_15[] = "[           ]";
 #endif
 
-PROGMEM const char* const msg_lcd_table[] = 	  
+ const char* const msg_lcd_table[] = 	  
 {   
   msg_lcd_0,
   msg_lcd_1,

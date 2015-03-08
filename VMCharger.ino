@@ -22,9 +22,9 @@ Absolutely NO WARRANTY is provided and no guarantee for fit for a specific purpo
 Original version created Jan 2011 by Valery Miftakhov, Electric Motor Werks, LLC & Inc. All rights reserved. Copyright 2011-...
 */
 
-#include <avr/interrupt.h> 
-#include <avr/pgmspace.h>
-#include <EEPROM.h>
+#include <Arduino.h>
+#include "SPIEEP.h"
+#include "SPIEEP_WriteAnything.h"
 #include "MemoryFree.h"
 #include "config.h"
 #include "constants.h"

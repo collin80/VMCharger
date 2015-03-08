@@ -1,4 +1,4 @@
-#include <EEPROM.h>
+#include "SPIEEP.h"
 #include <Arduino.h>  // for type definitions
 
 template <class T> int EEPROM_writeAnything(int ee, const T& value)
