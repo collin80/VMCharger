@@ -94,6 +94,9 @@ float maxMainsC=0; // allowed charger power - will be changed in code
 byte forceConfig=255; // default is 255 - has to be different from 0 or 1
 int J1772_dur;
 
+// initialize EEPROM chip - use SPIEEP lib (FIXED by Val for Due!)
+// examples at https://bitbucket.org/spirilis/spieep/wiki/ReadWrite
+SPIEEP eep(16, 64, 32768); // AT25256 Atmel or similar - 16 bit address, 64 bytes pagesize, 32768 bytes total size 
 
 //---------------------------------------------------------------------------------------------------------
 // as of V13, completely new way to control the charger! proper PID loop and interrupt-based fast ADC
@@ -194,7 +197,7 @@ ISR(ADC_vect) { // Analog->Digital Conversion Complete
 
 int32_t pids_Kp = 0;
 long pids_err=0, pids_perr=0, pids_i=0, pids_d=0; // all have to be signed longs in order to not screw up pid calcs
-volatile long deltaDuty=0, milliduty=0; // have to be signed
+volatile int32_t deltaDuty=0, milliduty=0; // have to be signed
 volatile byte tickerPWM=0; // short counter used only to skip cycles
 volatile byte tickerPWM1=0; // counter counting unskipped cycles - ok to overwrap
 
@@ -299,7 +302,10 @@ void sampleInterrupt() {
             PWM_enable_=0;
           }
           
-          Timer1.setPwmDuty(pin_PWM, milliduty/10000); 
+          //Timer1.setPwmDuty(pin_PWM, milliduty/10000); 
+		  //pwm is using 12 bit resolution now and so all values must be 4x higher
+		  //chances are other values should be changed rather than kludging here.
+		  pwm_write_duty(pin_PWM, milliduty / 2500);
   
           break;  
        }
@@ -332,6 +338,11 @@ void hardwareInit()
   pinMode(pin_fan, OUTPUT);
 
   setupButtons(); //attach interrupts to the buttons
+
+	eep.begin_spi(EEPROM_CSPIN); // use SPIEEP library instead
+  
+	analogReadResolution(analogResolution);
+
   
   // setup ADC
   ADMUX = B01000000;  // default to AVCC VRef, ADC Right Adjust, and ADC channel 0 (current)
@@ -342,10 +353,17 @@ void hardwareInit()
   ADCSRA = B11001111; 
   
   // setup timer - has to be before any ADC readouts
-  Timer1.initialize(period); 
-  Timer1.pwm(pin_PWM, 0); // need this here to enable interrupt
-  Timer1.pwm(pin_maxC, 0); // need this here to enable interrupt
-  Timer1.attachInterrupt(&sampleInterrupt); // attach our main ADC / PID interrupt
+	pwm_set_resolution(12);  // 12-bit resolution - 4096 steps
+	pwm_setup(pin_PWM, PWMFreq, 1);  // pin 9 - 20kHz - clock A (or '1')	
+	pwm_write_duty(pin_PWM, 0); // test - 50% duty on pin 9
+
+
+
+//  Timer1.initialize(period); 
+//  Timer1.pwm(pin_PWM, 0); // need this here to enable interrupt
+//  Timer1.pwm(pin_maxC, 0); // need this here to enable interrupt
+//  Timer1.attachInterrupt(&sampleInterrupt); // attach our main ADC / PID interrupt
+
   delay(50); // allow interrupts to fill in all analog values 
 
     //================= initialize the display ===========================================
@@ -365,7 +383,7 @@ void hardwareInit()
 void loadConfig()
 {
 	// check if needed to go into config 
-	EEPROM_readAnything(0, configuration);
+	eeRead(eep, 0, configuration);
 	// reset configuration if the green button is pressed at charger start
 	// on first connection, do zero cal of mainsV, as well
 	if(configuration.CC<=0 || isButton2Down()) {
@@ -533,7 +551,7 @@ void setupCalibration()
 	divider_k_bV*=configuration.Vcal_k; 
   
 	// write out the configuration to EEPROM for next time
-	EEPROM_writeAnything(0, configuration);
+	eeWrite(eep, 0, configuration);
 
 	//After config is done we'll go to the menu which is a safe thing to do.
 	state = STATE_TOP_MENU;
@@ -606,7 +624,7 @@ void factoryReset()
 	configuration.Vcal = 0.0f;
 	configuration.Vcal_k = 0.0f;
 	//then save the configuration
-	EEPROM_writeAnything(0, configuration);
+	eeWrite(eep, 0, configuration);
 	loadConfig(); //pretend we rebooted and go back through set up
 }
 
@@ -633,7 +651,7 @@ void chargeSetup()
 	maxOutV=float(configuration.CV)/100*configuration.nCells;
 	// cannot delay from here to charging function QC operation requires quick ramp after the command
 	// write out the configuration to EEPROM for next time
-	EEPROM_writeAnything(0, configuration);
+	eeWrite(eep, 0, configuration);
   
 	maxMainsC=configuration.mainsC; 
 	mainsV=read_mV(); // for power adjustments
@@ -974,9 +992,11 @@ int freeRam () {
 void setMaxC(float maxC) {
 #ifdef NEG_CSENSE
   // hardware limits in case of opposite direction of the sensor
-  Timer1.setPwmDuty(pin_maxC, 1023); // need something more than 3 volts as zero-current output is 2.5V...
+  //Timer1.setPwmDuty(pin_maxC, 1023); // need something more than 3 volts as zero-current output is 2.5V...
+  pwm_write_duty(pin_maxC, 4095); 
 #else
-  Timer1.setPwmDuty(pin_maxC, 1024./Aref*(V_o_C+k_V_C*maxC));
+  //Timer1.setPwmDuty(pin_maxC, 1024./Aref*(V_o_C+k_V_C*maxC));
+  pwm_write_duty(pin_maxC, 4095./Aref*(V_o_C+k_V_C*maxC)); 
 #endif
 }
 
@@ -984,7 +1004,7 @@ void setMaxC(float maxC) {
 void setTargetC() {
   // track targetC to maxOutC1
   if(POWER_DIRECTION==1) {
-    targetC_ADC=1024*(k_V_C*maxOutC1
+    targetC_ADC=analogRange*(k_V_C*maxOutC1
 #ifdef NEG_CSENSE
           *-1
 #endif
@@ -992,7 +1012,7 @@ void setTargetC() {
   } else {
     // scale according to input / output voltage settings
     // since POWER_DIRECTION=-1 means we are boosting, outV is always going to be higher than input
-    targetC_ADC=1024*(k_V_C*maxOutC1*(-1)*outV/mainsV
+    targetC_ADC=analogRange*(k_V_C*maxOutC1*(-1)*outV/mainsV
 #ifdef NEG_CSENSE
           *-1
 #endif

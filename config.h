@@ -78,8 +78,19 @@ const int DCDC_BUCK = 0; //1 = Input higher than output (single-stage buck units
 // #define DELTAQ  
 // ===================================================================================================
 
+// #define USESPI // SPI EEPROM chip
+#define EEPROM_CSPIN 52  // EEPROM Chip Select attached to pin 52
 #define serialspeed 19200 // 115 is unstable, 38.4 is a bit unstable...
 #define SerialStrSize 15 // M,ccc,vvv,sss,E
+
+// which UART port handles our charger comms?
+// pre-V16 controller boards, this was Serial1
+// V16 and later - Serial 2
+#ifdef V16
+  HardwareSerial &SerialCH=Serial2; 
+#else 
+  HardwareSerial &SerialCH=Serial1; 
+#endif
 
 // sensor constants - moved them to here as they are changed very often depending on what unit we have
 // 1M in low-voltage units (up to 150V)

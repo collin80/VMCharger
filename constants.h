@@ -118,6 +118,8 @@ const byte lowHeatSinkT = 35; // turn off the fans here
 //--------------------------------------------------------
 
 const float Aref = 3.3f; // 5V for ATMega328 (Pro Mini), 3.3V for ATSAM (Due) 
+const int analogResolution=12; // 12 bits
+const float analogRange=4096.; // 12 bits
 
 //=============== voltage dividers settings ===========================
 //--------- some constants for 7520 chips
