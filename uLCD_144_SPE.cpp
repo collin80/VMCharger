@@ -91,7 +91,7 @@ void uLCD_144_SPE::setFont(int font) {
 	waitAck();
 }
 
-void uLCD_144_SPE::printStr(int col, int row, int font, byte red, byte green, byte blue, const char *str) {
+void uLCD_144_SPE::printStr(int col, int row, int font, byte red, byte green, byte blue, char *str) {
   moveCursor(col, row);
   setFont(0);
   setFGcolor(red, green, blue);
@@ -103,7 +103,7 @@ void uLCD_144_SPE::printStr(int col, int row, int font, byte red, byte green, by
   Serial.write((uint8_t)0);  
   waitAck();
 }
-void uLCD_144_SPE::printStr(int col, int row, int font, byte red, byte green, byte blue, const char *str, int type) { // has to have a different sig from the above function
+void uLCD_144_SPE::printStr(int col, int row, int font, byte red, byte green, byte blue, char *str, int type) { // has to have a different sig from the above function
   moveCursor(col, row);
   setFont(0);
   setFGcolor(red, green, blue);

@@ -13,7 +13,7 @@ char SerialCommand[SerialStrSize+2]; // this is where the command will actually 
 
 //================== serial comms ========================
 // message FROM the charger via serial
-void EMWserialMsg(const char *txt) {
+void EMWserialMsg(char *txt) {
   Serial.print("M,");
   Serial.print(txt);
   Serial.println(",E");
@@ -223,7 +223,7 @@ void printMsg(char *str_, const int del, const byte col, const byte row, const b
 }
 
 
-unsigned int MenuSelector2(byte selection_total, const char * labels[])
+unsigned int MenuSelector2(byte selection_total, char * labels[])
 {
   byte selection = 0;
   byte temp_selection = 1;
@@ -253,9 +253,11 @@ unsigned int MenuSelector2(byte selection_total, const char * labels[])
       // similar to the above, should delegate display to StatusDisplay object
     } 
     delay(125);
+	clearButtons();
   }
 
   delay(250);
+  clearButtons();
   
   return selection - 1;
 }
