@@ -23,6 +23,7 @@ Original version created Jan 2011 by Valery Miftakhov, Electric Motor Werks, LLC
 */
 
 #include <Arduino.h>
+#include <spi.h>
 #include "SPIEEP.h"
 #include "SPIEEP_WriteAnything.h"
 #include "MemoryFree.h"
@@ -30,11 +31,11 @@ Original version created Jan 2011 by Valery Miftakhov, Electric Motor Werks, LLC
 #include "constants.h"
 #include "globals.h"
 #include "ConfigStruct.h"
-#include "EEPROM_VMcharger.h"
-#include "TimerOne.h"
 #include "Menu.h"
 #include "ValueTranslators.h"
 #include "buttons.h"
+#include "adc.h"
+#include "pwm01.h"
  
 struct config_t configuration;
 
@@ -108,67 +109,7 @@ volatile int32_t targetC_ADC=0; // this is an ADC reference point for our output
 volatile int32_t outC_ADC_0 = 0, outC_ADC = 0, outV_ADC = 0, outmV_ADC = 0, T_ADC = 0, T2_ADC = 0;
 volatile float outC_ADC_f=0;
 
-// ADC interrput handler
-// this is always aligned with Timer1 interrupt
-// ADC conversions are always done at 4kHz frequency (or every 250uS) so by the next Timer1 interrupt, 
-// we should ALWAYS have the result! 
-ISR(ADC_vect) { // Analog->Digital Conversion Complete
-  byte ul, uh;
-  cli(); // disable interrupt until function exit. otherwise nested interrupts...
-  ul=ADCL;
-  uh=ADCH;
-  sei();
-  
-  unsigned int val= (uh << 8 | ul); // assuming ADLAR=0
-  
-  // just load things into the variables and exit interrupt - processing all in main loop
-  // for most variable, average 2 values offset 180 degrees wrt haversine wave
-  // for current measurement, average 16 measurements over 8ms, or one full haversine period
-  switch(ADMUX & B00000111) {
-   case pin_C:  // this is measured at 2kHz frequency
-     if(outC_ADC==0) {
-       outC_ADC_f=outC_ADC=val;
-     } else {
-       // 16 cycles is 8ms here or a full haversine period
-       outC_ADC_f=(outC_ADC_f*15+val)/16; // this emulates an RC filter with time constant of ~half of averaged periods
-       outC_ADC=int(outC_ADC_f);
-     }
-     break;   
-   // rest of vars measured at 250Hz
-   case pin_bV: 
-     if(outV_ADC==0) {
-       outV_ADC=val;
-     } else {
-       outV_ADC=(outV_ADC+val)/2;
-     }
-     break;   
-   case pin_mV: 
-     if(outmV_ADC==0) {
-       outmV_ADC=val;
-     } else {
-       outmV_ADC=(outmV_ADC+val)/2;
-     }
-     break;
-   case pin_heatSinkT: 
-     if(T_ADC==0) {
-       T_ADC=val;
-     } else {
-       T_ADC=(T_ADC+val)/2;
-     }
-     break;
-   case pin_temp2: 
-     if(T2_ADC==0) {
-       T2_ADC=val;
-     } else {
-       T2_ADC=(T2_ADC+val)/2;
-     }
-     break;
-   default: break;
-  }
-
-} // end ADC interrupt
-
-
+ 
 //---------------- interrupt magic to initiate ADC and calc PID loop ---------------------------
 // PID loop setup - see http://en.wikipedia.org/wiki/PID_controller for some definitions
 // using only PI part of it here
@@ -201,6 +142,7 @@ volatile int32_t deltaDuty=0, milliduty=0; // have to be signed
 volatile byte tickerPWM=0; // short counter used only to skip cycles
 volatile byte tickerPWM1=0; // counter counting unskipped cycles - ok to overwrap
 
+
 // called on overflow of Timer1 - called every 'period' uS (20 kHz by default)
 // overflow with TimerOne library means we are in the center of the PWM cycle (TimerOne is phase correct)
 //This function is called in interrupt handler context so all variables modified (that are used outside of this function as well) must be volatile.
@@ -215,13 +157,9 @@ void sampleInterrupt() {
 
   tickerPWM=0;
   tickerPWM1++; // this counts at lower frequency
-    
-  ADMUX &= B11111000; // reset the channel to zero
 
   // then current is measured every second cycle - or at ~2kHz frequency
   if(tickerPWM1 & 0x1) {
-     ADMUX |= pin_C;
-     ADCSRA |= B11000000; // manually trigger next one
   } else {
     // Every parameter is measured every 16 cycles => 250 Hz measurement frequency for every variable
     // PID loop runs at the same frequency, as well    
@@ -229,23 +167,41 @@ void sampleInterrupt() {
        // case set below is MISSING 0,4,7 - available for other sensors
        case 0: {
          // average outC
+		if(outC_ADC==0) {
+			outC_ADC_f=outC_ADC= getAnalog(pin_C);
+		} else {
+			// 16 cycles is 8ms here or a full haversine period
+			outC_ADC_f=(outC_ADC_f*15+getAnalog(pin_C))/16; // this emulates an RC filter with time constant of ~half of averaged periods
+			outC_ADC=int(outC_ADC_f);
+		}
          if(fabs(outC)<1.) outC=readC(); // 
          outC=(outC*float(AVGCycles-1)+readC())/AVGCycles; 
          break;
        }
-       case 1: {
-         ADMUX |= pin_bV;
-         ADCSRA |= B11000000; // manually trigger next one
-         break;
-       }
+       case 1: 
+	    if(outV_ADC==0) {
+			outV_ADC=getAnalog(pin_bV);
+		} else {
+			outV_ADC=(outV_ADC+getAnalog(pin_bV))/2;
+		}
+
+		   break;
        case 2: {
-         ADMUX |= pin_mV;
-         ADCSRA |= B11000000; // manually trigger next one
+	    if(T_ADC==0) {
+			T_ADC=getAnalog(pin_heatSinkT);
+		} else {
+       		T_ADC=(T_ADC+getAnalog(pin_heatSinkT))/2;
+		}
+
          break;
        }
        case 3: {
-         ADMUX |= pin_heatSinkT;
-         ADCSRA |= B11000000; // manually trigger next one
+	    if(T_ADC==0) {
+			T_ADC=getAnalog(pin_temp2);
+		} else {
+			T_ADC=(T_ADC+getAnalog(pin_temp2))/2;
+		}
+
          break;
        }
        case 4: {
@@ -255,8 +211,12 @@ void sampleInterrupt() {
          break;
        }
        case 5: {
-         ADMUX |= pin_temp2;
-         ADCSRA |= B11000000; // manually trigger next one
+	    if(outmV_ADC==0) {
+			outmV_ADC=getAnalog(pin_mV);
+		} else {
+			outmV_ADC=(outmV_ADC+getAnalog(pin_mV))/2;
+		}
+
          break;
        }
        case 6: {
@@ -345,19 +305,12 @@ void hardwareInit()
 
   
   // setup ADC
-  ADMUX = B01000000;  // default to AVCC VRef, ADC Right Adjust, and ADC channel 0 (current)
-  ADCSRB = B00000000; // Analog Input bank 1
-  // ADC enable, ADC start, manual trigger mode, ADC interrupt enable, prescaler = 128 (3 bits in the end)
-  // standard prescaler is 128 resulting in 125kHz ADC clock. 1 conversion takes 13 ADC cycles = 100uS using standard prescaler
-  // 64 prescaler results in ~50uS conversion time
-  ADCSRA = B11001111; 
+  setup_adc();
   
   // setup timer - has to be before any ADC readouts
 	pwm_set_resolution(12);  // 12-bit resolution - 4096 steps
 	pwm_setup(pin_PWM, PWMFreq, 1);  // pin 9 - 20kHz - clock A (or '1')	
 	pwm_write_duty(pin_PWM, 0); // test - 50% duty on pin 9
-
-
 
 //  Timer1.initialize(period); 
 //  Timer1.pwm(pin_PWM, 0); // need this here to enable interrupt
@@ -365,6 +318,7 @@ void hardwareInit()
 //  Timer1.attachInterrupt(&sampleInterrupt); // attach our main ADC / PID interrupt
 
   delay(50); // allow interrupts to fill in all analog values 
+  adc_poll();
 
     //================= initialize the display ===========================================
 #ifdef LCD_SPE

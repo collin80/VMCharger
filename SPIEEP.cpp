@@ -4,8 +4,8 @@
  * http://www.gnu.org/copyleft/lesser.html
  */
 
-
-#include <SPIEEP.h>
+#include <Arduino.h>
+#include "SPIEEP.h"
 #include <SPI.h>
 
 // Microchip 25LC512 SPI EEPROM Instruction Set

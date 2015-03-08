@@ -54,7 +54,7 @@ float getAllowedC(float userMaxC) {
 //------------ calc current value from ADC value
 float readC() {
 	if(POWER_DIRECTION==1) {
-		return (Aref/1024.*outC_ADC-V_o_C)/k_V_C
+		return (Aref/analogRange*outC_ADC-V_o_C)/k_V_C
 #ifdef NEG_CSENSE
             *-1
 #endif
@@ -62,7 +62,7 @@ float readC() {
 	} else {
 		// scale according to input / output voltage settings
 		// since POWER_DIRECTION=-1 means we are boosting, outV is always going to be higher than input
-		return (Aref/1024.*outC_ADC-V_o_C)/k_V_C*(-1)*mainsV/outV
+		return (Aref/analogRange*outC_ADC-V_o_C)/k_V_C*(-1)*mainsV/outV
 #ifdef NEG_CSENSE
             *-1
 #endif
@@ -73,24 +73,24 @@ float readC() {
 //============================ voltage readout functions =====================
 // output voltage
 float readV() {  
-	if(DCDC_BUCK*POWER_DIRECTION==1) return (Aref/1024.*outmV_ADC-V_o_bV)*divider_k_bV;
-	return (Aref/1024.*outV_ADC-V_o_bV)*divider_k_bV;
+	if(DCDC_BUCK*POWER_DIRECTION==1) return (Aref/analogRange*outmV_ADC-V_o_bV)*divider_k_bV;
+	return (Aref/analogRange*outV_ADC-V_o_bV)*divider_k_bV;
 }
 
 // input voltage
 float read_mV() {
 #ifdef PC817 
 	// 3V is a threashold between 120V and 240V - but may require adjustment on a per-unit basis
-	if(Aref/1024.*outmV_ADC < 3) return 240;
+	if(Aref/analogRange*outmV_ADC < 3) return 240;
 	return 120;
 #endif
 
 #ifdef DCinput
-	if(DCDC_BUCK*POWER_DIRECTION==1) return (Aref/1024.*outV_ADC-V_o_mV)*divider_k_mV;
-	else return (Aref/1024.*outmV_ADC-V_o_mV)*divider_k_mV;
+	if(DCDC_BUCK*POWER_DIRECTION==1) return (Aref/analogRange*outV_ADC-V_o_mV)*divider_k_mV;
+	else return (Aref/analogRange*outmV_ADC-V_o_mV)*divider_k_mV;
 #else 
-	if(DCDC_BUCK*POWER_DIRECTION==1) return (Aref/1024.*outV_ADC-V_o_mV)*divider_k_mV/1.414;
-	else return (Aref/1024.*outmV_ADC-V_o_mV)*divider_k_mV/1.414;
+	if(DCDC_BUCK*POWER_DIRECTION==1) return (Aref/analogRange*outV_ADC-V_o_mV)*divider_k_mV/1.414;
+	else return (Aref/analogRange*outmV_ADC-V_o_mV)*divider_k_mV/1.414;
 #endif
 }
 //============================ end voltage readout functions =====================
@@ -110,5 +110,5 @@ byte getNormT() {
 }
 // master temp readout, using formulas from http://en.wikipedia.org/wiki/Thermistor
 byte read_T(unsigned int ADC_val) {
-  return (byte)1/( log(1/(1024./ADC_val-1)) /4540.+1/298.)-273; 
+  return (byte)1/( log(1/(analogRange/ADC_val-1)) /4540.+1/298.)-273; 
 }

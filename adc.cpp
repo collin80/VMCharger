@@ -35,62 +35,29 @@ by stimmer
 #undef HID_ENABLED
 
 #define NUM_ANALOG	8
-
-uint8_t adc[NUM_ANALOG][2];
+#define ADC_BUFFS	4
+#define NUM_ADC_SAMPLES	256 / NUM_ANALOG
 
 volatile int bufn,obufn;
-volatile uint16_t adc_buf[NUM_ANALOG][256];   // 4 buffers of 256 readings
-uint16_t adc_values[NUM_ANALOG * 2];
-uint16_t adc_out_vals[NUM_ANALOG];
-
-
-
-int NumADCSamples;
-
-//the ADC values fluctuate a lot so smoothing is required. 
-uint16_t adc_buffer[NUM_ANALOG][64];
-uint8_t adc_pointer[NUM_ANALOG]; //pointer to next position to use
+volatile uint16_t adc_buf[ADC_BUFFS][256];
+uint16_t adc_values[NUM_ANALOG];
 
 /*
 Initialize DMA driven ADC and read in gain/offset for each channel
 */
 void setup_adc() {
   int i;
-  
-  NumADCSamples = 64;
 
   setupFastADC();
 
   //requires the value to be contiguous in memory
   for (i = 0; i < NUM_ANALOG; i++) {
-    for (int j = 0; j < NumADCSamples; j++) adc_buffer[i][j] = 0;
-    adc_pointer[i] = 0;
-    adc_values[i] = 0;
-	adc_out_vals[i] = 0;
+	adc_values[i] = 0;
   }
 }
 
 /*
-Adds a new ADC reading to the buffer for a channel. The buffer is NumADCSamples large (either 32 or 64) and rolling
-*/
-void addNewADCVal(uint8_t which, uint16_t val) {
-  adc_buffer[which][adc_pointer[which]] = val;
-  adc_pointer[which] = (adc_pointer[which] + 1) % NumADCSamples;
-}
-
-/*
-Take the arithmetic average of the readings in the buffer for each channel. This smooths out the ADC readings
-*/
-uint16_t getADCAvg(uint8_t which) {
-  uint32_t sum;
-  sum = 0;
-  for (int j = 0; j < NumADCSamples; j++) sum += adc_buffer[which][j];
-  sum = sum / NumADCSamples;
-  return ((uint16_t)sum);
-}
-
-/*
-get value of one of the 4 analog inputs
+get value of one of the analog inputs
 Uses a special buffer which has smoothed and corrected ADC values. This call is very fast
 because the actual work is done via DMA and then a separate polled step.
 */
@@ -99,7 +66,7 @@ uint16_t getAnalog(uint8_t which) {
 	
     if (which >= NUM_ANALOG) which = 0;
 
-	return adc_out_vals[which];
+	return adc_values[which];
 }
 
 
@@ -114,11 +81,14 @@ minimal CPU overhead.
 */
 void ADC_Handler(){     // move DMA pointers to next buffer
   int f=ADC->ADC_ISR;
+  int nBuf = 0;
   if (f & (1<<27)){ //receive counter end of buffer
-   bufn=(bufn+1)&3;
-   ADC->ADC_RNPR=(uint32_t)adc_buf[bufn];
+   bufn=(bufn+1) % ADC_BUFFS;
+   nBuf = (bufn + 1) % ADC_BUFFS; //this is the next buffer so we need to increment yet again
+   ADC->ADC_RNPR=(uint32_t)adc_buf[nBuf];
    ADC->ADC_RNCR=256;  
   } 
+  adc_poll(); //not the best idea. the goal is to not run this function within the int handler
 }
 
 /*
@@ -136,14 +106,12 @@ void setupFastADC(){
   The ADC should take Tracking+Transfer for each read when it is set to switch channels with each read
 
   Example:
-  5+7 = 12 clocks per read 1M / 12 = 83333 reads per second. For newer boards there are 4 channels interleaved
-  so, for each channel, the readings are 48uS apart. 64 of these readings are averaged together for a total of 3ms
-  worth of ADC in each average. This is then averaged with the current value in the ADC buffer that is used for output.
-
-  If, for instance, someone wanted to average over 6ms instead then the prescaler could be set to 24x instead.
+  Now, if the divider is 50x then 1M / 50 = 20,000 clock rate. If we set our adc to use 12 ticks per reading then
+  that is 1666 reads per second. There are 8 ADC channels being read so each channel gets about 208 reads per second
+  or approximately one reading every 5-6ms. 
   */
   ADC->ADC_MR = (1 << 7) //free running
-              + (5 << 8) //12x MCLK divider ((This value + 1) * 2) = divisor
+              + (24 << 8) //50x MCLK divider ((This value + 1) * 2) = divisor
 			  + (1 << 16) //8 periods start up time (0=0clks, 1=8clks, 2=16clks, 3=24, 4=64, 5=80, 6=96, etc)
               + (1 << 20) //settling time (0=3clks, 1=5clks, 2=9clks, 3=17clks)
               + (4 << 24) //tracking time (Value + 1) clocks
@@ -167,36 +135,28 @@ void setupFastADC(){
 //polls	for the end of an adc conversion event. Then processe buffer to extract the averaged
 //value. It takes this value and averages it with the existing value in an 8 position buffer
 //which serves as a super fast place for other code to retrieve ADC values
-// This is only used when RAWADC is not defined
-void sys_io_adc_poll() {
+void adc_poll() {
 	if (obufn != bufn) {
 		uint32_t tempbuff[8] = {0,0,0,0,0,0,0,0}; //make sure its zero'd
 	
 		//the eight or four enabled adcs are interleaved in the buffer
 		//this is a somewhat unrolled for loop with no incrementer. it's odd but it works
-			for (int i = 0; i < 256;) {	   
-				tempbuff[7] += adc_buf[obufn][i++];
-				tempbuff[6] += adc_buf[obufn][i++];
-				tempbuff[5] += adc_buf[obufn][i++];
-				tempbuff[4] += adc_buf[obufn][i++];
-				tempbuff[3] += adc_buf[obufn][i++];
-				tempbuff[2] += adc_buf[obufn][i++];
-				tempbuff[1] += adc_buf[obufn][i++];
-				tempbuff[0] += adc_buf[obufn][i++];
-			}
-
-			for (int j = 0; j < 8; j++) {
-				adc_values[j] += (tempbuff[j] >> 5);
-				adc_values[j] = adc_values[j] >> 1;
-				//Logger::debug("A%i: %i", j, adc_values[j]);
-			}
-    
-		for (int i = 0; i < NUM_ANALOG; i++) {
-			int val;
-			//get value
-			adc_out_vals[i] = val;
+		for (int i = 0; i < 256;) {	   
+			tempbuff[7] += adc_buf[obufn][i++];
+			tempbuff[6] += adc_buf[obufn][i++];
+			tempbuff[5] += adc_buf[obufn][i++];
+			tempbuff[4] += adc_buf[obufn][i++];
+			tempbuff[3] += adc_buf[obufn][i++];
+			tempbuff[2] += adc_buf[obufn][i++];
+			tempbuff[1] += adc_buf[obufn][i++];
+			tempbuff[0] += adc_buf[obufn][i++];
 		}
 
+		for (int j = 0; j < 8; j++) {
+			adc_values[j] += (tempbuff[j] >> 5);
+			adc_values[j] = adc_values[j] >> 1;
+		}
+  
 		obufn = bufn;    
 	}
 }

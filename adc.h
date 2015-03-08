@@ -36,6 +36,6 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 void setup_adc();
 uint16_t getAnalog(uint8_t which); //get value of one of the 4 analog inputs
 void setupFastADC();
-void sys_io_adc_poll();
+void adc_poll();
 
 #endif

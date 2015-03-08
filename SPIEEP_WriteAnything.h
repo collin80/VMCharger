@@ -4,7 +4,7 @@
   #include <Arduino.h>
 #endif
 
-#include <SPIEEP.h>
+#include "SPIEEP.h"
 
 template <class T> int eeWrite(SPIEEP& spieep, int ee, const T& value)
 {
